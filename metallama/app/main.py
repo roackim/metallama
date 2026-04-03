@@ -46,6 +46,13 @@ class ProcessState:
     command: list[str]
 
 
+@dataclass(frozen=True)
+class AudioChunk:
+    wav_bytes: bytes
+    start_frame: int
+    prefix_skip_seconds: float
+
+
 class Config:
     EXECUTABLE_LLAMA = Path(os.getenv("METALLAMA_LLAMACPP_BINARY", "/local_home/debian/llm/llama.cpp/build/bin/llama-server"))
     EXECUTABLE_WHISPER = Path(os.getenv("METALLAMA_WHISPER_BINARY", "/local_home/debian/llm/whisper.cpp/build/bin/whisper-server"))
@@ -246,7 +253,11 @@ def _normalize_audio_to_wav(input_bytes: bytes) -> bytes:
     return result.stdout
 
 
-def _split_wav_chunks(wav_bytes: bytes, chunk_seconds: float = 25.0) -> list[bytes]:
+def _split_wav_chunks(
+    wav_bytes: bytes,
+    chunk_seconds: float = 25.0,
+    overlap_seconds: float = 0.5,
+) -> tuple[list[AudioChunk], int]:
     with wave.open(io.BytesIO(wav_bytes), "rb") as wav_reader:
         channels = wav_reader.getnchannels()
         sample_width = wav_reader.getsampwidth()
@@ -257,9 +268,11 @@ def _split_wav_chunks(wav_bytes: bytes, chunk_seconds: float = 25.0) -> list[byt
     frame_size = channels * sample_width
     frame_count = len(raw_frames) // frame_size
     frames_per_chunk = max(1, int(sample_rate * chunk_seconds))
-    chunks: list[bytes] = []
+    overlap_frames = max(0, int(sample_rate * overlap_seconds))
+    step_frames = max(1, frames_per_chunk - overlap_frames)
+    chunks: list[AudioChunk] = []
 
-    for start_frame in range(0, frame_count, frames_per_chunk):
+    for start_frame in range(0, frame_count, step_frames):
         end_frame = min(frame_count, start_frame + frames_per_chunk)
         start_byte = start_frame * frame_size
         end_byte = end_frame * frame_size
@@ -271,9 +284,54 @@ def _split_wav_chunks(wav_bytes: bytes, chunk_seconds: float = 25.0) -> list[byt
             writer.setsampwidth(sample_width)
             writer.setframerate(sample_rate)
             writer.writeframes(chunk_frames)
-        chunks.append(buffer.getvalue())
+        chunks.append(
+            AudioChunk(
+                wav_bytes=buffer.getvalue(),
+                start_frame=start_frame,
+                prefix_skip_seconds=overlap_seconds if start_frame > 0 else 0.0,
+            )
+        )
 
-    return chunks
+        if end_frame >= frame_count:
+            break
+
+    return chunks, sample_rate
+
+
+def _to_segment_seconds(value: Any) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    # whisper.cpp often emits centiseconds (t0/t1); fallback to seconds if already small.
+    return numeric / 100.0 if numeric > 200 else numeric
+
+
+def _extract_segments(payload: Any) -> list[tuple[float, float, str]]:
+    if not isinstance(payload, dict):
+        return []
+
+    raw_segments = payload.get("segments")
+    if not isinstance(raw_segments, list):
+        return []
+
+    segments: list[tuple[float, float, str]] = []
+    for segment in raw_segments:
+        if not isinstance(segment, dict):
+            continue
+
+        text = str(segment.get("text", "")).strip()
+        if not text:
+            continue
+
+        start_s = _to_segment_seconds(segment.get("t0", 0))
+        end_s = _to_segment_seconds(segment.get("t1", 0))
+        if end_s <= start_s:
+            continue
+
+        segments.append((start_s, end_s, text))
+
+    return segments
 
 
 def _format_timestamp(seconds: float) -> str:
@@ -285,21 +343,34 @@ def _format_timestamp(seconds: float) -> str:
     return f"{mins:02d}:{secs:02d}"
 
 
-def _extract_chunk_text(payload: Any, include_timecodes: bool) -> str:
-    if isinstance(payload, dict):
-        if include_timecodes and isinstance(payload.get("segments"), list):
+def _extract_chunk_text(
+    payload: Any,
+    include_timecodes: bool,
+    chunk_start_seconds: float,
+    prefix_skip_seconds: float,
+) -> str:
+    segments = _extract_segments(payload)
+    if segments:
+        # Keep only segments that begin after the overlap guard band.
+        # This avoids keeping half-cut leading words from the current chunk.
+        threshold = max(0.0, prefix_skip_seconds - 0.05)
+        kept_segments = [seg for seg in segments if seg[0] >= threshold]
+        if not kept_segments:
+            kept_segments = segments
+        if include_timecodes:
             lines: list[str] = []
-            for segment in payload["segments"]:
-                if not isinstance(segment, dict):
-                    continue
-                start = _format_timestamp(float(segment.get("t0", 0)) / 100.0)
-                end = _format_timestamp(float(segment.get("t1", 0)) / 100.0)
-                text = str(segment.get("text", "")).strip()
-                if text:
-                    lines.append(f"[{start} - {end}] {text}")
+            for start_s, end_s, text in kept_segments:
+                start = _format_timestamp(chunk_start_seconds + start_s)
+                end = _format_timestamp(chunk_start_seconds + end_s)
+                lines.append(f"[{start} - {end}] {text}")
             if lines:
                 return "\n".join(lines)
+        else:
+            text_parts = [text for _, _, text in kept_segments]
+            if text_parts:
+                return " ".join(text_parts).strip()
 
+    if isinstance(payload, dict):
         text = payload.get("text")
         if isinstance(text, str):
             return text.strip()
@@ -542,12 +613,12 @@ async def transcript_stream(
                 yield _ndjson_line(
                     {
                         "event": "status",
-                        "message": "Chunking audio for progressive transcription...",
+                        "message": "Chunking audio with overlap-aware stitching...",
                         "progress": 5,
                     }
                 )
 
-                chunks = await asyncio.to_thread(_split_wav_chunks, wav_bytes, 25.0)
+                chunks, sample_rate = await asyncio.to_thread(_split_wav_chunks, wav_bytes, 25.0, 0.8)
                 total_chunks = max(1, len(chunks))
                 parts: list[str] = []
 
@@ -562,12 +633,18 @@ async def transcript_stream(
                         }
                     )
 
-                    payload = await _request_whisper_chunk(chunk, language)
-                    chunk_text = _extract_chunk_text(payload, include_timecodes=include_timecodes)
+                    payload = await _request_whisper_chunk(chunk.wav_bytes, language)
+                    chunk_text = _extract_chunk_text(
+                        payload,
+                        include_timecodes=include_timecodes,
+                        chunk_start_seconds=chunk.start_frame / sample_rate,
+                        prefix_skip_seconds=chunk.prefix_skip_seconds,
+                    )
                     if chunk_text:
                         parts.append(chunk_text)
 
-                    live_text = _collapse_repetitions("\n".join(parts))
+                    joined_text = "\n".join(parts) if include_timecodes else " ".join(parts)
+                    live_text = _collapse_repetitions(joined_text)
                     yield _ndjson_line(
                         {
                             "event": "partial",
@@ -578,7 +655,8 @@ async def transcript_stream(
                         }
                     )
 
-                final_text = _collapse_repetitions("\n".join(parts))
+                final_joined = "\n".join(parts) if include_timecodes else " ".join(parts)
+                final_text = _collapse_repetitions(final_joined)
                 elapsed_ms = int((time.time() - started_at) * 1000)
                 yield _ndjson_line(
                     {
