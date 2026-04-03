@@ -1,15 +1,16 @@
 const modelsEl = document.getElementById("models");
-const configForm = document.getElementById("config-form");
-const binaryPathInput = document.getElementById("binary-path");
-const baseUrlInput = document.getElementById("base-url");
-const configMessageEl = document.getElementById("config-message");
+const uiMessageEl = document.getElementById("ui-message");
 const summaryEl = document.getElementById("summary");
+const themeButtons = document.querySelectorAll(".theme-btn");
+const heroLogoEl = document.getElementById("hero-logo");
+
+const THEME_KEY = "metallama.theme";
 
 let inFlight = new Set();
 
 function setConfigMessage(msg, isError = false) {
-  configMessageEl.textContent = msg;
-  configMessageEl.style.color = isError ? "#b00020" : "#0f5132";
+  uiMessageEl.textContent = msg;
+  uiMessageEl.classList.toggle("error", isError);
 }
 
 async function api(path, options = {}) {
@@ -41,30 +42,93 @@ function canStop(model) {
   return model.status === "running" && !inFlight.has(model.id);
 }
 
-function formatTag(value) {
-  return String(value || "").trim().toUpperCase();
+function modelTypeLabel(model) {
+  return model.modality === "audio" ? "AUDIO" : "LLM";
+}
+
+function getThemePreference() {
+  const saved = window.localStorage.getItem(THEME_KEY);
+  if (saved === "light" || saved === "dark" || saved === "system") {
+    return saved;
+  }
+  return "system";
+}
+
+function resolveSystemTheme() {
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function applyTheme(themePreference) {
+  const theme = themePreference === "system" ? resolveSystemTheme() : themePreference;
+  document.documentElement.dataset.theme = theme;
+
+  const titleLogo = document.getElementById("hero-logo");
+  if (titleLogo) {
+    titleLogo.src =
+      theme === "dark" ? "/static/assets/logo-carre-blanc.svg" : "/static/assets/logo-carre-noir.svg";
+  }
+
+  themeButtons.forEach((button) => {
+    const isActive = button.dataset.theme === themePreference;
+    button.classList.toggle("active", isActive);
+  });
+}
+
+function setupThemeSwitcher() {
+  const pref = getThemePreference();
+  applyTheme(pref);
+
+  themeButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const nextTheme = button.dataset.theme;
+      window.localStorage.setItem(THEME_KEY, nextTheme);
+      applyTheme(nextTheme);
+    });
+  });
+
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    if (getThemePreference() === "system") {
+      applyTheme("system");
+    }
+  });
 }
 
 function cardTemplate(model) {
+  const action = model.status === "running" ? "stop" : "start";
+  const label = action === "stop" ? "Stop" : "Start";
+  const canRunAction = action === "stop" ? canStop(model) : canStart(model);
+  const type = modelTypeLabel(model);
+
   return `
-    <article class="card">
-      <div class="card-head">
-        <h3>${model.display_name}</h3>
-        <span class="status ${model.status}">${model.status}</span>
+    <article class="card ${model.status}">
+      <div class="card-header-row">
+        <div class="title-wrap">
+          <span class="type-label ${type.toLowerCase()}">${type}</span>
+          <h3>${model.display_name}</h3>
+        </div>
+        <div class="spacer"></div>
+        <div class="status-badge ${model.status}">${model.status}</div>
       </div>
-      <div class="tags">
-        <span class="tag">${formatTag(model.modality)}</span>
-        <span class="tag">${formatTag(model.use_case)}</span>
-        <span class="tag">${model.size}</span>
-      </div>
-      <p class="description">${model.description}</p>
-      <p class="meta"><strong>Family:</strong> ${model.family}</p>
-      <p class="meta"><strong>URL:</strong> ${model.url}</p>
-      <p class="meta"><strong>Port:</strong> ${model.port}</p>
-      <p class="meta"><strong>PID:</strong> ${model.pid ?? "-"}</p>
-      <div class="actions">
-        <button data-id="${model.id}" data-action="start" ${canStart(model) ? "" : "disabled"}>Start</button>
-        <button data-id="${model.id}" data-action="stop" ${canStop(model) ? "" : "disabled"}>Stop</button>
+
+      <div class="card-main-row">
+        <div class="card-meta-col">
+          <div class="endpoint-row">
+            <span class="endpoint-label">URL:</span>
+            <a class="endpoint-link" href="${model.url}" target="_blank">${model.url}</a>
+          </div>
+
+          <div class="info-row">
+            <span class="info-item">PORT: ${model.port}</span>
+            <span class="info-item">PID: ${model.pid ?? "-"}</span>
+            <button class="btn-secondary btn-small" data-id="${model.id}" data-action="cmd" title="Copy launch command">CMD</button>
+          </div>
+        </div>
+
+        <p class="description">${model.description}</p>
+
+        <div class="card-actions-col">
+          <button class="btn-action-${action}" data-id="${model.id}" data-action="${action}" ${canRunAction ? "" : "disabled"}>${label}</button>
+        </div>
       </div>
     </article>
   `;
@@ -74,18 +138,12 @@ function renderModels(models) {
   modelsEl.innerHTML = models.map(cardTemplate).join("");
 
   const running = models.filter((m) => m.status === "running").length;
-  summaryEl.textContent = `${running}/${models.length} running`;
+  summaryEl.textContent = `${running} / ${models.length} ACTIVE SERVERS`;
 }
 
 async function refreshModels() {
   const data = await api("/api/models");
   renderModels(data.models || []);
-}
-
-async function loadConfig() {
-  const config = await api("/api/config");
-  binaryPathInput.value = config.llamacpp_binary || "";
-  baseUrlInput.value = config.base_url || "";
 }
 
 async function startStop(modelId, action) {
@@ -98,6 +156,20 @@ async function startStop(modelId, action) {
   }
 }
 
+async function copyToClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const temp = document.createElement("textarea");
+  temp.value = text;
+  document.body.appendChild(temp);
+  temp.select();
+  document.execCommand("copy");
+  document.body.removeChild(temp);
+}
+
 modelsEl.addEventListener("click", async (event) => {
   const target = event.target;
   if (!(target instanceof HTMLButtonElement)) {
@@ -106,36 +178,44 @@ modelsEl.addEventListener("click", async (event) => {
 
   const modelId = target.dataset.id;
   const action = target.dataset.action;
+  const url = target.dataset.url;
   if (!modelId || !action) {
     return;
   }
 
   try {
+    if (action === "copy") {
+      if (!url) {
+        throw new Error("Missing URL");
+      }
+      await copyToClipboard(url);
+      setConfigMessage("Endpoint copied");
+      return;
+    }
+
+    if (action === "cmd") {
+      const data = await api(`/api/models/${modelId}/command`);
+      await copyToClipboard(data.command);
+      setConfigMessage("Launch command copied to clipboard");
+      return;
+    }
+
+    if (action === "open") {
+      if (!url) {
+        throw new Error("Missing URL");
+      }
+      window.open(url, "_blank", "noopener,noreferrer");
+      return;
+    }
+
     await startStop(modelId, action);
   } catch (err) {
     setConfigMessage(err.message, true);
   }
 });
 
-configForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  try {
-    await api("/api/config", {
-      method: "POST",
-      body: JSON.stringify({
-        llamacpp_binary: binaryPathInput.value,
-        base_url: baseUrlInput.value,
-      }),
-    });
-    setConfigMessage("Config saved");
-    await refreshModels();
-  } catch (err) {
-    setConfigMessage(err.message, true);
-  }
-});
-
 async function init() {
-  await loadConfig();
+  setupThemeSwitcher();
   await refreshModels();
   setInterval(() => {
     refreshModels().catch(() => {});

@@ -4,8 +4,11 @@ import asyncio
 import os
 import shlex
 import signal
+import socket
 import subprocess
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -20,6 +23,7 @@ from pydantic import BaseModel, Field
 class ModelProfile:
     id: str
     display_name: str
+    engine: str
     modality: str
     use_case: str
     family: str
@@ -37,11 +41,11 @@ class ProcessState:
     command: list[str]
 
 
-class ConfigUpdate(BaseModel):
-    llamacpp_binary: str = Field(min_length=1)
-    base_url: str | None = None
+class Config:
+    EXECUTABLE_LLAMA = Path(os.getenv("METALLAMA_LLAMACPP_BINARY", "/local_home/debian/llm/llama.cpp/build/bin/llama-server"))
+    EXECUTABLE_WHISPER = Path(os.getenv("METALLAMA_WHISPER_BINARY", "/local_home/debian/llm/whisper.cpp/build/bin/whisper-server"))
+    BASE_URL = os.getenv("METALLAMA_BASE_URL", "http://gpu4.hygeos.com")
 
-MODELS_DIR = Path("/envs/local/llm/models/")
 APP_DIR = Path(__file__).resolve().parent
 STATIC_DIR = APP_DIR / "static"
 
@@ -49,12 +53,13 @@ MODEL_PROFILES: dict[str, ModelProfile] = {
     "qwen35-27b-code": ModelProfile(
         id="qwen35-27b-code",
         display_name="Qwen 3.5 27B",
+        engine="llama",
         modality="text",
         use_case="code",
         family="Qwen 3.5",
         size="27B",
         description="Primary coding model for chat and generation tasks.",
-        model_path=MODELS_DIR / "Qwen3.5-27B-Q8_0.gguf",
+        model_path="/envs/local/llm/models/Qwen3.5-27B-Q8_0.gguf",
         port=8011,
         extra_args=[
             "--ctx-size 229376",
@@ -68,21 +73,18 @@ MODEL_PROFILES: dict[str, ModelProfile] = {
             "--repeat-penalty 1.0",
         ],
     ),
-    "qwen25-omni-7b-audio": ModelProfile(
-        id="qwen25-omni-7b-audio",
-        display_name="Qwen 2.5 Omni 7B",
+    "whisper-large-v3": ModelProfile(
+        id="whisper-large-v3",
+        display_name="Whisper Large V3 turbo",
+        engine="whisper",
         modality="audio",
-        use_case="speech",
-        family="Qwen 2.5 Omni",
-        size="7B",
-        description="Audio-capable model for speech and multimodal workflows.",
-        model_path=MODELS_DIR / "Qwen2.5-Omni-7B.gguf",
+        use_case="transcription",
+        family="Whisper",
+        size="Large",
+        description="Advanced transcription model for diverse audio processing.",
+        model_path="/local_home/debian/llm/whisper.cpp/models/ggml-large-v3-turbo.bin",
         port=8012,
-        extra_args=[
-            "--ctx-size 16384",
-            "--threads 8",
-            "--n-gpu-layers 999",
-        ],
+        extra_args=[],
     ),
 }
 
@@ -92,11 +94,6 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 runtime_processes: dict[str, ProcessState] = {}
 model_locks: dict[str, asyncio.Lock] = {key: asyncio.Lock() for key in MODEL_PROFILES}
-
-CONFIG: dict[str, str] = {
-    "llamacpp_binary": os.getenv("METALLAMA_LLAMACPP_BINARY", "/local_home/debian/llm/llama.cpp/build/bin/llama-server"),
-    "base_url": os.getenv("METALLAMA_BASE_URL", "http://gpu4.hygeos.com"),
-}
 
 
 def _is_alive(proc: subprocess.Popen[str]) -> bool:
@@ -109,10 +106,30 @@ def _cleanup_dead(model_id: str) -> None:
         runtime_processes.pop(model_id, None)
 
 
+def _is_port_open(host: str, port: int, timeout: float = 0.3) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _is_whisper_ready(port: int, timeout: float = 0.5) -> bool:
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=timeout) as response:
+            return 200 <= response.status < 300
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return False
+
+
 def _build_command(profile: ModelProfile) -> list[str]:
-    binary = CONFIG["llamacpp_binary"].strip()
+    if profile.engine == "whisper":
+        binary = Config.EXECUTABLE_WHISPER
+    else:
+        binary = Config.EXECUTABLE_LLAMA
+
     if not binary:
-        raise HTTPException(status_code=400, detail="llamacpp_binary is empty")
+        raise HTTPException(status_code=400, detail=f"{profile.engine} binary is empty")
 
     binary_path = Path(binary)
     if binary_path.is_absolute() and not binary_path.exists():
@@ -123,46 +140,63 @@ def _build_command(profile: ModelProfile) -> list[str]:
         raise HTTPException(status_code=400, detail=f"Model file not found: {profile.model_path}")
 
     # Accept both extra arg styles:
-    # - ["--ctx-size", "8192"]
-    # - ["--ctx-size 8192", "--threads 8"]
     normalized_extra_args: list[str] = []
     for arg in profile.extra_args:
         parts = shlex.split(arg)
         normalized_extra_args.extend(parts if parts else [arg])
 
-    return [
-        binary,
-        "--model",
-        str(model_path),
-        "--host",
-        "0.0.0.0",
-        "--port",
-        str(profile.port),
-        *normalized_extra_args,
-    ]
+    if profile.engine == "whisper":
+        return [
+            str(binary),
+            "--model",
+            str(model_path),
+            "--host",
+            "0.0.0.0",
+            "--port",
+            str(profile.port),
+            *normalized_extra_args,
+        ]
+    else:
+        return [
+            str(binary),
+            "--model",
+            str(model_path),
+            "--host",
+            "0.0.0.0",
+            "--port",
+            str(profile.port),
+            *normalized_extra_args,
+        ]
 
 
-def _status_for(model_id: str) -> str:
-    _cleanup_dead(model_id)
-    state = runtime_processes.get(model_id)
+def _status_for(profile: ModelProfile) -> str:
+    _cleanup_dead(profile.id)
+    state = runtime_processes.get(profile.id)
     if not state:
         return "stopped"
-    return "running" if _is_alive(state.process) else "stopped"
+    if not _is_alive(state.process):
+        return "stopped"
+
+    if profile.engine == "whisper":
+        return "running" if _is_whisper_ready(profile.port) else "starting"
+
+    return "running" if _is_port_open("127.0.0.1", profile.port) else "starting"
 
 
 def _model_payload(profile: ModelProfile) -> dict[str, Any]:
-    status = _status_for(profile.id)
+    status = _status_for(profile)
     state = runtime_processes.get(profile.id)
     return {
         "id": profile.id,
         "display_name": profile.display_name,
+        "engine": profile.engine,
         "modality": profile.modality,
         "use_case": profile.use_case,
         "family": profile.family,
         "size": profile.size,
         "description": profile.description,
         "port": profile.port,
-        "url": f"{CONFIG['base_url']}:{profile.port}",
+        "url": f"{Config.BASE_URL}:{profile.port}",
         "status": status,
         "pid": state.process.pid if state and status == "running" else None,
     }
@@ -175,15 +209,11 @@ def index() -> FileResponse:
 
 @app.get("/api/config")
 def get_config() -> dict[str, str]:
-    return dict(CONFIG)
-
-
-@app.post("/api/config")
-def update_config(payload: ConfigUpdate) -> dict[str, str]:
-    CONFIG["llamacpp_binary"] = payload.llamacpp_binary.strip()
-    if payload.base_url is not None:
-        CONFIG["base_url"] = payload.base_url.strip() or CONFIG["base_url"]
-    return dict(CONFIG)
+    return {
+        "EXECUTABLE_LLAMA": str(Config.EXECUTABLE_LLAMA),
+        "EXECUTABLE_WHISPER": str(Config.EXECUTABLE_WHISPER),
+        "BASE_URL": str(Config.BASE_URL),
+    }
 
 
 @app.get("/api/models")
