@@ -383,6 +383,16 @@ body {
   margin: 0;
 }
 
+.model-name-muted {
+  font-size: 0.74rem;
+  color: var(--muted);
+  font-style: italic;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  white-space: nowrap;
+}
+
 .type-label {
   font-size: 0.62rem;
   font-weight: 900;
@@ -399,6 +409,16 @@ body {
 
 .type-label.audio {
   background: #15803d;
+  color: #ffffff;
+}
+
+.type-label.ocr {
+  background: #7c3aed;
+  color: #ffffff;
+}
+
+.type-label.docs {
+  background: #0f766e;
   color: #ffffff;
 }
 
@@ -434,6 +454,23 @@ body {
   align-items: center;
   justify-self: end;
   gap: 0;
+}
+
+.card-error {
+  margin: 0;
+  padding: 0.5rem 0.65rem;
+  border: var(--border-size) solid color-mix(in srgb, var(--red) 75%, var(--line));
+  background: color-mix(in srgb, var(--red) 12%, var(--panel));
+  color: color-mix(in srgb, var(--red) 85%, var(--text));
+  font-weight: 800;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  display: none;
+}
+
+.card-error.visible {
+  display: block;
 }
 
 /* ── Rows inside Cards ──────────────────────────────────── */

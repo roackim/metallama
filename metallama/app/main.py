@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncIterator
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi import File, Form, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
@@ -29,8 +30,7 @@ class ModelProfile:
     id: str
     display_name: str
     engine: str
-    modality: str
-    use_case: str
+    service: str
     family: str
     size: str
     description: str
@@ -53,9 +53,14 @@ class AudioChunk:
     prefix_skip_seconds: float
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(dotenv_path=PROJECT_ROOT / ".env")
+
+
 class Config:
-    EXECUTABLE_LLAMA = Path(os.getenv("METALLAMA_LLAMACPP_BINARY", "/local_home/debian/llm/llama.cpp/build/bin/llama-server"))
-    EXECUTABLE_WHISPER = Path(os.getenv("METALLAMA_WHISPER_BINARY", "/local_home/debian/llm/whisper.cpp/build/bin/whisper-server"))
+    EXECUTABLE_LLAMA = os.getenv("METALLAMA_LLAMACPP_BINARY", "")
+    EXECUTABLE_WHISPER = os.getenv("METALLAMA_WHISPER_BINARY", "")
+    EXECUTABLE_MINERU_VENV = os.getenv("METALLAMA_MINERU_VENV", "")
     BASE_URL = os.getenv("METALLAMA_BASE_URL", "http://gpu4.hygeos.com")
 
 APP_DIR = Path(__file__).resolve().parent
@@ -64,10 +69,9 @@ STATIC_DIR = APP_DIR / "static"
 MODEL_PROFILES: dict[str, ModelProfile] = {
     "qwen35-27b-code": ModelProfile(
         id="qwen35-27b-code",
-        display_name="Qwen 3.5 27B",
+        display_name="Assistant",
         engine="llama",
-        modality="text",
-        use_case="code",
+        service="LLM",
         family="Qwen 3.5",
         size="27B",
         description="Primary coding model for chat and generation tasks.",
@@ -87,15 +91,27 @@ MODEL_PROFILES: dict[str, ModelProfile] = {
     ),
     "whisper-large-v3": ModelProfile(
         id="whisper-large-v3",
-        display_name="Whisper Large V3 turbo",
+        display_name="Scribe",
         engine="whisper",
-        modality="audio",
-        use_case="transcription",
+        service="AUDIO",
         family="Whisper",
         size="Large",
         description="Advanced transcription model for diverse audio processing.",
         model_path="/local_home/debian/llm/whisper.cpp/models/ggml-large-v3-turbo.bin",
-        port=8012,
+        port=8013,
+        extra_args=[
+        ],
+    ),
+    "mineru-ocr": ModelProfile(
+        id="mineru-ocr",
+        display_name="Reader",
+        engine="mineru",
+        service="OCR",
+        family="MinerU",
+        size="N/A",
+        description="OCR API server powered by mineru-api.",
+        model_path="",
+        port=8014,
         extra_args=[],
     ),
 }
@@ -135,9 +151,29 @@ def _is_whisper_ready(port: int, timeout: float = 0.5) -> bool:
         return False
 
 
+def _resolve_mineru_binary() -> str:
+    venv_path = Config.EXECUTABLE_MINERU_VENV.strip()
+    if not venv_path:
+        raise HTTPException(
+            status_code=400,
+            detail="METALLAMA_MINERU_VENV is not configured",
+        )
+
+    binary = Path(venv_path) / "bin" / "mineru-api"
+    if not binary.exists():
+        raise HTTPException(
+            status_code=400,
+            detail=f"MinerU executable not found: {binary}",
+        )
+
+    return str(binary)
+
+
 def _build_command(profile: ModelProfile) -> list[str]:
     if profile.engine == "whisper":
         binary = Config.EXECUTABLE_WHISPER
+    elif profile.engine == "mineru":
+        binary = _resolve_mineru_binary()
     else:
         binary = Config.EXECUTABLE_LLAMA
 
@@ -148,15 +184,25 @@ def _build_command(profile: ModelProfile) -> list[str]:
     if binary_path.is_absolute() and not binary_path.exists():
         raise HTTPException(status_code=400, detail=f"Binary does not exist: {binary}")
 
-    model_path = Path(profile.model_path)
-    if not model_path.exists():
-        raise HTTPException(status_code=400, detail=f"Model file not found: {profile.model_path}")
-
     # Accept both extra arg styles:
     normalized_extra_args: list[str] = []
     for arg in profile.extra_args:
         parts = shlex.split(arg)
         normalized_extra_args.extend(parts if parts else [arg])
+
+    if profile.engine == "mineru":
+        return [
+            str(binary),
+            "--host",
+            "0.0.0.0",
+            "--port",
+            str(profile.port),
+            *normalized_extra_args,
+        ]
+
+    model_path = Path(profile.model_path)
+    if not model_path.exists():
+        raise HTTPException(status_code=400, detail=f"Model file not found: {profile.model_path}")
 
     if profile.engine == "whisper":
         return [
@@ -185,6 +231,12 @@ def _build_command(profile: ModelProfile) -> list[str]:
 def _status_for(profile: ModelProfile) -> str:
     _cleanup_dead(profile.id)
     state = runtime_processes.get(profile.id)
+
+    # MinerU may daemonize/fork and detach from the parent process.
+    # Treat an open service port as the source of truth for runtime status.
+    if profile.engine == "mineru":
+        return "running" if _is_port_open("127.0.0.1", profile.port) else "stopped"
+
     if not state:
         return "stopped"
     if not _is_alive(state.process):
@@ -203,8 +255,7 @@ def _model_payload(profile: ModelProfile) -> dict[str, Any]:
         "id": profile.id,
         "display_name": profile.display_name,
         "engine": profile.engine,
-        "modality": profile.modality,
-        "use_case": profile.use_case,
+        "service": profile.service,
         "family": profile.family,
         "size": profile.size,
         "description": profile.description,
@@ -480,6 +531,7 @@ def get_config() -> dict[str, str]:
     return {
         "EXECUTABLE_LLAMA": str(Config.EXECUTABLE_LLAMA),
         "EXECUTABLE_WHISPER": str(Config.EXECUTABLE_WHISPER),
+        "EXECUTABLE_MINERU_VENV": str(Config.EXECUTABLE_MINERU_VENV),
         "BASE_URL": str(Config.BASE_URL),
     }
 
@@ -497,6 +549,10 @@ async def start_model(model_id: str) -> dict[str, Any]:
 
     async with model_locks[model_id]:
         _cleanup_dead(model_id)
+
+        if profile.engine == "mineru" and _is_port_open("127.0.0.1", profile.port):
+            raise HTTPException(status_code=409, detail="Already running")
+
         existing = runtime_processes.get(model_id)
         if existing and _is_alive(existing.process):
             raise HTTPException(status_code=409, detail="Already running")

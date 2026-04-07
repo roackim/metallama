@@ -22,6 +22,19 @@ const THEME_KEY = "metallama.theme";
 
 let inFlight = new Set();
 let transcriptionInFlight = false;
+const cardErrors = new Map();
+
+function setCardError(modelId, message = "") {
+  if (!modelId) {
+    return;
+  }
+  const normalized = String(message || "").trim();
+  if (!normalized) {
+    cardErrors.delete(modelId);
+    return;
+  }
+  cardErrors.set(modelId, normalized);
+}
 
 function setConfigMessage(msg, isError = false) {
   uiMessageEl.textContent = msg;
@@ -58,7 +71,19 @@ function canStop(model) {
 }
 
 function modelTypeLabel(model) {
-  return model.modality === "audio" ? "AUDIO" : "LLM";
+  const normalized = String(model.service || "").trim().toUpperCase();
+  if (["LLM", "AUDIO", "DOCS", "OCR"].includes(normalized)) {
+    return normalized;
+  }
+
+  // Backward compatibility fallback during reloads.
+  if (model.engine === "whisper") {
+    return "AUDIO";
+  }
+  if (model.engine === "mineru") {
+    return "OCR";
+  }
+  return "LLM";
 }
 
 function getThemePreference() {
@@ -113,6 +138,8 @@ function cardTemplate(model) {
   const label = action === "stop" ? "Stop" : "Start";
   const canRunAction = action === "stop" ? canStop(model) : canStart(model);
   const type = modelTypeLabel(model);
+  const cardError = cardErrors.get(model.id) || "";
+  const cardErrorClass = cardError ? "card-error visible" : "card-error";
 
   return `
     <article class="card ${model.status}">
@@ -120,6 +147,7 @@ function cardTemplate(model) {
         <div class="title-wrap">
           <span class="type-label ${type.toLowerCase()}">${type}</span>
           <h3>${model.display_name}</h3>
+          <span class="model-name-muted">${model.id}</span>
         </div>
         <div class="spacer"></div>
         <div class="status-badge ${model.status}">${model.status}</div>
@@ -145,6 +173,8 @@ function cardTemplate(model) {
           <button class="btn-action-${action}" data-id="${model.id}" data-action="${action}" ${canRunAction ? "" : "disabled"}>${label}</button>
         </div>
       </div>
+
+      <p class="${cardErrorClass}" aria-live="polite">${cardError}</p>
     </article>
   `;
 }
@@ -165,6 +195,7 @@ async function startStop(modelId, action) {
   inFlight.add(modelId);
   try {
     await api(`/api/models/${modelId}/${action}`, { method: "POST" });
+    setCardError(modelId, "");
   } finally {
     inFlight.delete(modelId);
     await refreshModels();
@@ -211,6 +242,7 @@ modelsEl.addEventListener("click", async (event) => {
     if (action === "cmd") {
       const data = await api(`/api/models/${modelId}/command`);
       await copyToClipboard(data.command);
+      setCardError(modelId, "");
       setConfigMessage("Launch command copied to clipboard");
       return;
     }
@@ -225,6 +257,8 @@ modelsEl.addEventListener("click", async (event) => {
 
     await startStop(modelId, action);
   } catch (err) {
+    setCardError(modelId, err.message);
+    await refreshModels();
     setConfigMessage(err.message, true);
   }
 });
