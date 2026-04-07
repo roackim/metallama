@@ -9,10 +9,9 @@ const fileLabelEl = document.getElementById("file-label");
 const languageEl = document.getElementById("transcript-language");
 const timecodesEl = document.getElementById("timecodes");
 const transcribeBtnEl = document.getElementById("transcribe-btn");
-const transcriptProgressWrapEl = document.getElementById("transcript-progress-wrap");
-const transcriptProgressEl = document.getElementById("transcript-progress");
-const transcriptProgressValueEl = document.getElementById("transcript-progress-value");
+const transcriptOverlayEl = document.getElementById("transcript-overlay");
 const transcriptStatusEl = document.getElementById("transcript-status");
+const cancelTranscriptBtnEl = document.getElementById("cancel-transcript-btn");
 const transcriptErrorEl = document.getElementById("transcript-error");
 const transcriptLiveEl = document.getElementById("transcript-live");
 const transcriptOutputSectionEl = document.getElementById("transcript-output-section");
@@ -24,10 +23,9 @@ const ocrFileEl = document.getElementById("ocr-file");
 const ocrFileLabelEl = document.getElementById("ocr-file-label");
 const ocrParseMethodEl = document.getElementById("ocr-parse-method");
 const ocrBtnEl = document.getElementById("ocr-btn");
-const ocrProgressWrapEl = document.getElementById("ocr-progress-wrap");
-const ocrProgressEl = document.getElementById("ocr-progress");
-const ocrProgressValueEl = document.getElementById("ocr-progress-value");
+const ocrOverlayEl = document.getElementById("ocr-overlay");
 const ocrStatusEl = document.getElementById("ocr-status");
+const cancelOcrBtnEl = document.getElementById("cancel-ocr-btn");
 const ocrErrorEl = document.getElementById("ocr-error");
 const ocrLiveEl = document.getElementById("ocr-live");
 const ocrOutputSectionEl = document.getElementById("ocr-output-section");
@@ -39,6 +37,8 @@ const THEME_KEY = "metallama.theme";
 let inFlight = new Set();
 let transcriptionInFlight = false;
 let ocrInFlight = false;
+let transcriptAbortController = null;
+let ocrAbortController = null;
 const cardErrors = new Map();
 
 function setCardError(modelId, message = "") {
@@ -312,14 +312,7 @@ async function init() {
   }, 2000);
 }
 
-function updateTranscriptProgress(value, statusText) {
-  const normalizedValue = Math.max(0, Math.min(100, Number(value || 0)));
-  transcriptProgressEl.style.width = `${normalizedValue}%`;
-  transcriptProgressValueEl.textContent = `${Math.round(normalizedValue)}%`;
-  const progressTrack = transcriptProgressEl.closest(".transcript-progress-track");
-  if (progressTrack) {
-    progressTrack.setAttribute("aria-valuenow", String(Math.round(normalizedValue)));
-  }
+function updateTranscriptStatus(statusText) {
   transcriptStatusEl.textContent = statusText || "Working...";
 }
 
@@ -329,10 +322,8 @@ function setTranscriptionRunning(running) {
   audioFileEl.disabled = running;
   languageEl.disabled = running;
   timecodesEl.disabled = running;
-  transcriptProgressWrapEl.classList.toggle("is-hidden", !running);
-  if (!running) {
-    updateTranscriptProgress(0, "Idle");
-  }
+  cancelTranscriptBtnEl.disabled = !running;
+  transcriptOverlayEl.classList.toggle("is-hidden", !running);
 }
 
 function updateFileLabel() {
@@ -351,14 +342,7 @@ function setTranscriptError(message = "") {
   transcriptErrorEl.classList.add("visible");
 }
 
-function updateOcrProgress(value, statusText) {
-  const normalizedValue = Math.max(0, Math.min(100, Number(value || 0)));
-  ocrProgressEl.style.width = `${normalizedValue}%`;
-  ocrProgressValueEl.textContent = `${Math.round(normalizedValue)}%`;
-  const progressTrack = ocrProgressEl.closest(".transcript-progress-track");
-  if (progressTrack) {
-    progressTrack.setAttribute("aria-valuenow", String(Math.round(normalizedValue)));
-  }
+function updateOcrStatus(statusText) {
   ocrStatusEl.textContent = statusText || "Working...";
 }
 
@@ -367,10 +351,8 @@ function setOcrRunning(running) {
   ocrBtnEl.disabled = running;
   ocrFileEl.disabled = running;
   ocrParseMethodEl.disabled = running;
-  ocrProgressWrapEl.classList.toggle("is-hidden", !running);
-  if (!running) {
-    updateOcrProgress(0, "Idle");
-  }
+  cancelOcrBtnEl.disabled = !running;
+  ocrOverlayEl.classList.toggle("is-hidden", !running);
 }
 
 function updateOcrFileLabel() {
@@ -439,8 +421,7 @@ function setupTranscriptUI() {
 
     const file = audioFileEl.files?.[0];
     if (!file) {
-      setTranscriptError("");
-      updateTranscriptProgress(0, "Choose an audio file first");
+      setTranscriptError("Choose an audio file first");
       return;
     }
 
@@ -453,12 +434,14 @@ function setupTranscriptUI() {
     setTranscriptError("");
     setTranscriptionRunning(true);
     updateTranscriptVisibility();
-    updateTranscriptProgress(0, "Uploading and preparing...");
+    updateTranscriptStatus("Uploading and preparing...");
+    transcriptAbortController = new AbortController();
 
     try {
       const response = await fetch("/api/transcript/stream", {
         method: "POST",
         body: formData,
+        signal: transcriptAbortController.signal,
       });
 
       if (!response.ok || !response.body) {
@@ -494,25 +477,22 @@ function setupTranscriptUI() {
           }
 
           if (payload.event === "queued") {
-            updateTranscriptProgress(payload.progress || 1, payload.message || "Queued...");
+            updateTranscriptStatus(payload.message || "Queued...");
           }
 
           if (payload.event === "status") {
-            updateTranscriptProgress(payload.progress || 0, payload.message || "Working...");
+            updateTranscriptStatus(payload.message || "Working...");
           }
 
           if (payload.event === "partial") {
             transcriptLiveEl.textContent = payload.text || "";
             updateTranscriptVisibility();
-            updateTranscriptProgress(payload.progress || 0, `Transcribing ${payload.chunk_index || ""}/${payload.chunk_total || ""}`);
+            updateTranscriptStatus(`Transcribing ${payload.chunk_index || ""}/${payload.chunk_total || ""}`);
           }
 
           if (payload.event === "done") {
             transcriptLiveEl.textContent = payload.text || "";
             updateTranscriptVisibility();
-            const elapsed = Number(payload.elapsed_ms || 0);
-            const elapsedSec = (elapsed / 1000).toFixed(1);
-            updateTranscriptProgress(100, `Completed in ${elapsedSec}s`);
           }
 
           if (payload.event === "error") {
@@ -521,13 +501,19 @@ function setupTranscriptUI() {
         }
       }
     } catch (err) {
-      const message = err.message || "Transcription failed";
+      const message = err.name === "AbortError" ? "Transcription canceled" : err.message || "Transcription failed";
       setConfigMessage(message, true);
       setTranscriptError(message);
-      updateTranscriptProgress(0, message);
     } finally {
+      transcriptAbortController = null;
       setTranscriptionRunning(false);
       updateTranscriptVisibility();
+    }
+  });
+
+  cancelTranscriptBtnEl.addEventListener("click", () => {
+    if (transcriptionInFlight && transcriptAbortController) {
+      transcriptAbortController.abort();
     }
   });
 
@@ -595,8 +581,7 @@ function setupOcrUI() {
 
     const file = ocrFileEl.files?.[0];
     if (!file) {
-      setOcrError("");
-      updateOcrProgress(0, "Choose a document file first");
+      setOcrError("Choose a document file first");
       return;
     }
 
@@ -615,12 +600,14 @@ function setupOcrUI() {
     setOcrError("");
     setOcrRunning(true);
     updateOcrVisibility();
-    updateOcrProgress(5, "Uploading file...");
+    updateOcrStatus("Uploading file...");
+    ocrAbortController = new AbortController();
 
     try {
       const response = await fetch("/api/ocr/parse", {
         method: "POST",
         body: formData,
+        signal: ocrAbortController.signal,
       });
 
       if (!response.ok) {
@@ -628,7 +615,7 @@ function setupOcrUI() {
         throw new Error(payload.detail || `Request failed (${response.status})`);
       }
 
-      updateOcrProgress(70, "Parsing document...");
+      updateOcrStatus("Parsing document...");
       const data = await response.json();
       const markdown = String(data.markdown || "");
       if (!markdown.trim()) {
@@ -638,16 +625,21 @@ function setupOcrUI() {
       ocrLiveEl.textContent = markdown;
       ocrLiveEl.dataset.sourceName = data.filename || file.name;
       updateOcrVisibility();
-      updateOcrProgress(100, "OCR completed");
       setConfigMessage("OCR extraction finished");
     } catch (err) {
-      const message = err.message || "OCR extraction failed";
+      const message = err.name === "AbortError" ? "OCR canceled" : err.message || "OCR extraction failed";
       setConfigMessage(message, true);
       setOcrError(message);
-      updateOcrProgress(0, message);
     } finally {
+      ocrAbortController = null;
       setOcrRunning(false);
       updateOcrVisibility();
+    }
+  });
+
+  cancelOcrBtnEl.addEventListener("click", () => {
+    if (ocrInFlight && ocrAbortController) {
+      ocrAbortController.abort();
     }
   });
 

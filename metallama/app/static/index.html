@@ -79,12 +79,12 @@
 
         <p id="transcript-error" class="transcript-error" aria-live="polite"></p>
 
-        <div id="transcript-progress-wrap" class="transcript-progress-wrap is-hidden">
-          <div class="transcript-progress-track" aria-label="Transcription progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-            <div id="transcript-progress" class="transcript-progress-fill"></div>
+        <div id="transcript-overlay" class="panel-overlay is-hidden">
+          <div class="overlay-content">
+            <div class="spinner"></div>
+            <p id="transcript-status" class="overlay-status">Working...</p>
+            <button id="cancel-transcript-btn" class="btn-cancel" type="button">Cancel</button>
           </div>
-          <p id="transcript-progress-value" class="transcript-progress-value">0%</p>
-          <p id="transcript-status" class="transcript-status">Idle</p>
         </div>
 
         <div id="transcript-output-section" class="transcript-output-grid single is-hidden">
@@ -130,12 +130,12 @@
 
         <p id="ocr-error" class="transcript-error" aria-live="polite"></p>
 
-        <div id="ocr-progress-wrap" class="transcript-progress-wrap is-hidden">
-          <div class="transcript-progress-track" aria-label="OCR progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-            <div id="ocr-progress" class="transcript-progress-fill"></div>
+        <div id="ocr-overlay" class="panel-overlay is-hidden">
+          <div class="overlay-content">
+            <div class="spinner"></div>
+            <p id="ocr-status" class="overlay-status">Working...</p>
+            <button id="cancel-ocr-btn" class="btn-cancel" type="button">Cancel</button>
           </div>
-          <p id="ocr-progress-value" class="transcript-progress-value">0%</p>
-          <p id="ocr-status" class="transcript-status">Idle</p>
         </div>
 
         <div id="ocr-output-section" class="transcript-output-grid single is-hidden">
