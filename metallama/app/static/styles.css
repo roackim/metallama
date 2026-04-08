@@ -135,16 +135,23 @@ body {
 .transcript-panel.service-audio { --panel-accent: #F4A501; }
 .transcript-panel.service-ocr   { --panel-accent: #8EC561; }
 
+.transcript-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+}
+
 .transcript-header h2 {
   margin: 0;
   font-size: 1.15rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text);
+  flex-shrink: 0;
 }
 
 .transcript-header p {
-  margin: 0.35rem 0 0;
+  margin: 0;
   color: var(--muted);
   font-size: 0.85rem;
 }
@@ -187,6 +194,18 @@ body {
   color: var(--drop);
 }
 
+.file-selected {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--panel-accent, var(--drop));
+  font-weight: 700;
+}
+
+.file-icon {
+  flex-shrink: 0;
+}
+
 #transcribe-btn {
   background: #F4A501;
   color: #ffffff;
@@ -208,12 +227,18 @@ body {
 }
 
 .transcript-controls label {
-  display: grid;
-  gap: 0.2rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
   min-width: 0;
 }
 
+.transcript-controls label > span {
+  flex-shrink: 0;
+}
+
 .transcript-controls select {
+  flex: 1;
   border: var(--border-size) solid var(--line);
   background: var(--panel);
   color: var(--text);
@@ -417,6 +442,7 @@ body {
 .card-header-row {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 0.6rem;
   border-bottom: var(--border-size) solid var(--line);
   padding-bottom: 0.45rem;
@@ -518,15 +544,16 @@ body {
   text-transform: uppercase;
   font-size: 0.7rem;
   letter-spacing: 0.04em;
-  padding: 7px 16px;
+  padding: 7px 0;
   line-height: 1;
   text-align: center;
   border-radius: 0;
-  border: 0;
+  border: 2px solid transparent;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 80px;
+  width: 88px;
+  box-sizing: border-box;
 }
 
 .card-error {

@@ -17,7 +17,7 @@
           <img id="hero-logo" class="header-logo" src="/static/assets/logo-carre-noir.svg" alt="Hygeos logo" />
           <div class="header-text">
             <h1 class="hero-title">Meta-llama</h1>
-            <p class="subtitle">HYGEOS LLM ORCHESTRATION &mdash; Dedicated model servers</p>
+            <p class="subtitle">HYGEOS's &mdash; Dedicated AI Services</p>
           </div>
         </div>
         <div class="theme-toggle" role="group" aria-label="Theme switcher">
@@ -54,7 +54,6 @@
             <label class="file-drop" for="audio-file">
               <input id="audio-file" name="audio" type="file" accept="audio/*" required />
               <span class="file-drop-label">Drop audio file here or click to select</span>
-              <span id="file-label">No file selected</span>
             </label>
 
             <div class="transcript-controls">
@@ -112,7 +111,6 @@
             <label class="file-drop" for="ocr-file">
               <input id="ocr-file" name="ocr-file" type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" required />
               <span class="file-drop-label">Drop document file here or click to select</span>
-              <span id="ocr-file-label">No file selected</span>
             </label>
 
             <div class="transcript-controls">
@@ -121,6 +119,11 @@
                 <select id="ocr-parse-method" name="parse-method">
                   <option value="auto">auto</option>
                 </select>
+              </label>
+
+              <label class="checkbox-row">
+                <input id="ocr-extract-images" type="checkbox" name="extract-images" />
+                <span>Extract images (ZIP)</span>
               </label>
 
               <button id="ocr-btn" type="submit">Extract OCR</button>
@@ -145,6 +148,7 @@
               <div class="action-row">
                 <button id="copy-ocr-btn" class="btn-secondary btn-small" type="button">Copy</button>
                 <button id="download-ocr-btn" class="btn-secondary btn-small" type="button">Download .md</button>
+                <button id="download-ocr-zip-btn" class="btn-secondary btn-small is-hidden" type="button">Download .zip</button>
               </div>
             </div>
             <pre id="ocr-live" class="transcript-output"></pre>

@@ -5,7 +5,7 @@ const themeButtons = document.querySelectorAll(".theme-btn");
 const heroLogoEl = document.getElementById("hero-logo");
 const transcriptFormEl = document.getElementById("transcript-form");
 const audioFileEl = document.getElementById("audio-file");
-const fileLabelEl = document.getElementById("file-label");
+const fileLabelEl = document.querySelector(".service-audio .file-drop-label");
 const languageEl = document.getElementById("transcript-language");
 const timecodesEl = document.getElementById("timecodes");
 const transcribeBtnEl = document.getElementById("transcribe-btn");
@@ -20,8 +20,9 @@ const downloadTranscriptBtnEl = document.getElementById("download-transcript-btn
 
 const ocrFormEl = document.getElementById("ocr-form");
 const ocrFileEl = document.getElementById("ocr-file");
-const ocrFileLabelEl = document.getElementById("ocr-file-label");
+const ocrFileLabelEl = document.querySelector(".service-ocr .file-drop-label");
 const ocrParseMethodEl = document.getElementById("ocr-parse-method");
+const ocrExtractImagesEl = document.getElementById("ocr-extract-images");
 const ocrBtnEl = document.getElementById("ocr-btn");
 const ocrOverlayEl = document.getElementById("ocr-overlay");
 const ocrStatusEl = document.getElementById("ocr-status");
@@ -31,6 +32,7 @@ const ocrLiveEl = document.getElementById("ocr-live");
 const ocrOutputSectionEl = document.getElementById("ocr-output-section");
 const copyOcrBtnEl = document.getElementById("copy-ocr-btn");
 const downloadOcrBtnEl = document.getElementById("download-ocr-btn");
+const downloadOcrZipBtnEl = document.getElementById("download-ocr-zip-btn");
 
 const THEME_KEY = "metallama.theme";
 
@@ -39,6 +41,7 @@ let transcriptionInFlight = false;
 let ocrInFlight = false;
 let transcriptAbortController = null;
 let ocrAbortController = null;
+let ocrZipId = null;
 const cardErrors = new Map();
 
 function setCardError(modelId, message = "") {
@@ -175,6 +178,7 @@ function cardTemplate(model) {
           <span class="model-name-muted">${model.id}</span>
           <span class="type-label ${type.toLowerCase()}">${type}</span>
         </div>
+        <div class="status-badge ${model.status}">${model.status}</div>
       </div>
 
       <div class="card-main-row">
@@ -194,7 +198,6 @@ function cardTemplate(model) {
         <p class="description">${model.description}</p>
 
         <div class="card-actions-col">
-          <div class="status-badge ${model.status}">${model.status}</div>
           <button class="btn-action-${action}" data-id="${model.id}" data-action="${action}" ${canRunAction ? "" : "disabled"}>${label}</button>
         </div>
       </div>
@@ -350,9 +353,17 @@ function setTranscriptionRunning(running) {
   transcriptOverlayEl.classList.toggle("is-hidden", !running);
 }
 
+const FILE_ICON_SVG = '<svg class="file-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+
 function updateFileLabel() {
   const file = audioFileEl.files?.[0];
-  fileLabelEl.textContent = file ? `Selected: ${file.name}` : "No file selected";
+  if (file) {
+    fileLabelEl.innerHTML = `${FILE_ICON_SVG} ${file.name}`;
+    fileLabelEl.classList.add("file-selected");
+  } else {
+    fileLabelEl.textContent = "Drop audio file here or click to select";
+    fileLabelEl.classList.remove("file-selected");
+  }
 }
 
 function setTranscriptError(message = "") {
@@ -375,13 +386,20 @@ function setOcrRunning(running) {
   ocrBtnEl.disabled = running;
   ocrFileEl.disabled = running;
   ocrParseMethodEl.disabled = running;
+  ocrExtractImagesEl.disabled = running;
   cancelOcrBtnEl.disabled = !running;
   ocrOverlayEl.classList.toggle("is-hidden", !running);
 }
 
 function updateOcrFileLabel() {
   const file = ocrFileEl.files?.[0];
-  ocrFileLabelEl.textContent = file ? `Selected: ${file.name}` : "No file selected";
+  if (file) {
+    ocrFileLabelEl.innerHTML = `${FILE_ICON_SVG} ${file.name}`;
+    ocrFileLabelEl.classList.add("file-selected");
+  } else {
+    ocrFileLabelEl.textContent = "Drop document file here or click to select";
+    ocrFileLabelEl.classList.remove("file-selected");
+  }
 }
 
 function setOcrError(message = "") {
@@ -397,14 +415,13 @@ function setOcrError(message = "") {
 
 function updateOcrVisibility() {
   const hasText = Boolean((ocrLiveEl.textContent || "").trim());
-  const shouldShow = ocrInFlight || hasText;
-  ocrOutputSectionEl.classList.toggle("is-hidden", !shouldShow);
+  ocrOutputSectionEl.classList.toggle("is-hidden", !hasText);
+  downloadOcrZipBtnEl.classList.toggle("is-hidden", !ocrZipId);
 }
 
 function updateTranscriptVisibility() {
   const hasText = Boolean((transcriptLiveEl.textContent || "").trim());
-  const shouldShow = transcriptionInFlight || hasText;
-  transcriptOutputSectionEl.classList.toggle("is-hidden", !shouldShow);
+  transcriptOutputSectionEl.classList.toggle("is-hidden", !hasText);
 }
 
 function setupTranscriptUI() {
@@ -620,7 +637,13 @@ function setupOcrUI() {
     formData.append("parse_method", ocrParseMethodEl.value || "auto");
     formData.append("backend", "pipeline");
 
+    const wantZip = ocrExtractImagesEl.checked;
+    if (wantZip) {
+      formData.append("extract_images", "true");
+    }
+
     ocrLiveEl.textContent = "";
+    ocrZipId = null;
     setOcrError("");
     setOcrRunning(true);
     updateOcrVisibility();
@@ -648,8 +671,13 @@ function setupOcrUI() {
 
       ocrLiveEl.textContent = markdown;
       ocrLiveEl.dataset.sourceName = data.filename || file.name;
+
+      if (data.zip_id) {
+        ocrZipId = data.zip_id;
+      }
+
       updateOcrVisibility();
-      setConfigMessage("OCR extraction finished");
+      setConfigMessage(wantZip ? "OCR extraction finished — ZIP ready for download" : "OCR extraction finished");
     } catch (err) {
       const message = err.name === "AbortError" ? "OCR canceled" : err.message || "OCR extraction failed";
       setConfigMessage(message, true);
@@ -692,6 +720,40 @@ function setupOcrUI() {
     const sourceName = ocrLiveEl.dataset.sourceName || "ocr-output";
     downloadMarkdownFile(sourceName, text);
     setConfigMessage("OCR markdown downloaded");
+  });
+
+  downloadOcrZipBtnEl.addEventListener("click", async () => {
+    if (!ocrZipId) {
+      setConfigMessage("No ZIP available", true);
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/ocr/zip/${ocrZipId}`);
+      if (!response.ok) {
+        throw new Error("ZIP download failed");
+      }
+
+      const blob = await response.blob();
+      const disposition = response.headers.get("Content-Disposition") || "";
+      const match = disposition.match(/filename="?([^";\n]+)"?/);
+      const zipName = match ? match[1] : "ocr_output.zip";
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = zipName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+
+      ocrZipId = null;
+      updateOcrVisibility();
+      setConfigMessage("OCR ZIP downloaded");
+    } catch (err) {
+      setConfigMessage(err.message || "ZIP download failed", true);
+    }
   });
 }
 

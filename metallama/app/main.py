@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import STATIC_DIR, Config
 from .models import ProcessState
-from .ocr_utils import request_mineru_markdown
+from .ocr_utils import pop_zip, request_mineru_markdown, request_mineru_zip
 from .profiles import MODEL_PROFILES
 from .runtime import (
     build_command,
@@ -247,7 +247,8 @@ async def ocr_parse(
     file: UploadFile = File(...),
     parse_method: str = Form("auto"),
     backend: str = Form("pipeline"),
-) -> dict[str, str]:
+    extract_images: bool = Form(False),
+) -> Any:
     filename = file.filename or "document"
     suffix = Path(filename).suffix.lower()
     if suffix not in {".pdf", ".png", ".jpg", ".jpeg"}:
@@ -258,6 +259,17 @@ async def ocr_parse(
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
     content_type = file.content_type or "application/octet-stream"
+
+    if extract_images:
+        markdown, zip_id = await request_mineru_zip(
+            file_bytes=file_bytes,
+            filename=filename,
+            content_type=content_type,
+            parse_method=parse_method,
+            backend=backend,
+        )
+        return {"filename": filename, "markdown": markdown, "zip_id": zip_id}
+
     markdown = await request_mineru_markdown(
         file_bytes=file_bytes,
         filename=filename,
@@ -267,3 +279,16 @@ async def ocr_parse(
     )
 
     return {"filename": filename, "markdown": markdown}
+
+
+@app.get("/api/ocr/zip/{zip_id}")
+def download_ocr_zip(zip_id: str) -> StreamingResponse:
+    entry = pop_zip(zip_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="ZIP not found or already downloaded")
+    zip_bytes, zip_name = entry
+    return StreamingResponse(
+        iter([zip_bytes]),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{zip_name}"'},
+    )
