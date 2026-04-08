@@ -38,7 +38,9 @@ const copyOcrBtnEl = document.getElementById("copy-ocr-btn");
 const downloadOcrBtnEl = document.getElementById("download-ocr-btn");
 const downloadOcrZipBtnEl = document.getElementById("download-ocr-zip-btn");
 const OCR_ADD_LABEL = "Add documents [+]";
-const DOWNLOAD_ICON_SVG = '<svg class="ocr-action-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>';
+const OCR_QUEUE_FILE_ICON_SVG = '<svg class="ocr-queue-file-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+const OCR_QUEUE_ARCHIVE_ICON_SVG = '<svg class="ocr-queue-file-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="4"/><path d="M5 8h14v12H5z"/><path d="M10 12h4"/></svg>';
+const OCR_QUEUE_DOWNLOAD_ICON_SVG = '<svg class="ocr-queue-action-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>';
 
 const THEME_KEY = "metallama.theme";
 
@@ -50,6 +52,7 @@ let ocrAbortController = null;
 let ocrCancelRequested = false;
 let ocrQueue = [];
 let ocrSelectedId = null;
+let ocrModelIdCache = null;
 const cardErrors = new Map();
 
 function setCardError(modelId, message = "") {
@@ -399,8 +402,7 @@ function setOcrRunning(running) {
 
 function updateOcrFileLabel() {
   if (ocrQueue.length > 0) {
-    const plural = ocrQueue.length > 1 ? "s" : "";
-    ocrFileLabelEl.innerHTML = `${FILE_ICON_SVG} ${ocrQueue.length} file${plural} selected [+]`;
+    ocrFileLabelEl.textContent = "";
     ocrFileLabelEl.classList.add("file-selected");
   } else {
     ocrFileLabelEl.textContent = OCR_ADD_LABEL;
@@ -491,6 +493,53 @@ function statusClass(status) {
   return "status-pending";
 }
 
+function withExtension(fileName, extension) {
+  const base = String(fileName || "output").replace(/\.[^/.]+$/, "");
+  return `${base}${extension}`;
+}
+
+async function resolveOcrModelId() {
+  if (ocrModelIdCache) {
+    return ocrModelIdCache;
+  }
+
+  const data = await api("/api/models");
+  const model = (data.models || []).find((entry) => String(entry.service || "").toUpperCase() === "OCR");
+  ocrModelIdCache = model?.id || null;
+  return ocrModelIdCache;
+}
+
+async function ensureOcrServerReady() {
+  const modelId = await resolveOcrModelId();
+  if (!modelId) {
+    throw new Error("OCR server profile not found");
+  }
+
+  const statusPayload = await api(`/api/models/${modelId}/status`);
+  if (statusPayload.status === "running") {
+    return;
+  }
+
+  try {
+    await api(`/api/models/${modelId}/start`, { method: "POST" });
+  } catch (err) {
+    const message = String(err?.message || "").toLowerCase();
+    if (!message.includes("already running")) {
+      throw err;
+    }
+  }
+
+  for (let i = 0; i < 30; i += 1) {
+    const probe = await api(`/api/models/${modelId}/status`);
+    if (probe.status === "running") {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
+  throw new Error("OCR server is not ready");
+}
+
 function statusLabel(status) {
   if (status === "done") {
     return "DONE";
@@ -515,20 +564,19 @@ function renderOcrQueue() {
     .map((item) => {
       const active = item.id === ocrSelectedId ? "active" : "";
       const klass = statusClass(item.status);
+      const isZipReady = item.status === "done" && Boolean(item.zipId);
+      const displayName = isZipReady ? withExtension(item.name, ".ocr.zip") : item.name;
+      const icon = isZipReady ? OCR_QUEUE_ARCHIVE_ICON_SVG : OCR_QUEUE_FILE_ICON_SVG;
       const removeDisabled = ocrInFlight ? "disabled" : "";
-      const canDownload = item.status === "done" && item.zipId;
-      const downloadButton = canDownload
-        ? `<button class="ocr-queue-download" type="button" data-ocr-download-id="${item.id}" aria-label="Download ${item.name}" title="Download ZIP">${DOWNLOAD_ICON_SVG}</button>`
-        : "";
+      const actionButton = isZipReady
+        ? `<button class="ocr-queue-action ocr-queue-download" type="button" data-ocr-download-id="${item.id}" aria-label="Download ${displayName}" title="Download ${displayName}">${OCR_QUEUE_DOWNLOAD_ICON_SVG}</button>`
+        : `<button class="ocr-queue-action ocr-queue-remove" type="button" data-ocr-remove-id="${item.id}" ${removeDisabled} aria-label="Remove ${item.name}">X</button>`;
       return `<li class="ocr-queue-item ${klass} ${active}">
         <button class="ocr-queue-main" type="button" data-ocr-item-id="${item.id}" title="${item.name}">
-          <span class="ocr-queue-name">${item.name}</span>
-          <span class="ocr-queue-state">${statusLabel(item.status)}</span>
+          ${icon}
+          <span class="ocr-queue-name">${displayName}</span>
         </button>
-        <div class="ocr-queue-actions">
-          ${downloadButton}
-          <button class="ocr-queue-remove" type="button" data-ocr-remove-id="${item.id}" ${removeDisabled} aria-label="Remove ${item.name}">X</button>
-        </div>
+        ${actionButton}
       </li>`;
     })
     .join("");
@@ -613,7 +661,7 @@ function renderOcrDetail() {
     return;
   }
 
-  ocrDetailFilenameEl.textContent = item.name;
+  ocrDetailFilenameEl.textContent = withExtension(item.name, ".md");
   if (item.status === "error") {
     ocrDetailStatusEl.textContent = item.error || "OCR failed";
     ocrDetailStatusEl.classList.remove("is-hidden");
@@ -869,7 +917,29 @@ function setupOcrUI() {
     stageOcrQueueFromInput();
   });
 
-  const dropZone = ocrFormEl.querySelector(".file-drop");
+  const dropZone = ocrFormEl.querySelector(".ocr-drop-zone");
+  if (!dropZone) {
+    return;
+  }
+
+  dropZone.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) {
+      return;
+    }
+    if (target.closest(".ocr-queue-main") || target.closest(".ocr-queue-action")) {
+      return;
+    }
+    ocrFileEl.click();
+  });
+
+  dropZone.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      ocrFileEl.click();
+    }
+  });
+
   ["dragenter", "dragover"].forEach((eventName) => {
     dropZone.addEventListener(eventName, (event) => {
       event.preventDefault();
@@ -894,23 +964,26 @@ function setupOcrUI() {
   if (ocrQueueListEl) {
     ocrQueueListEl.addEventListener("click", (event) => {
       const target = event.target;
-      if (!(target instanceof HTMLButtonElement)) {
-        return;
-      }
-      const downloadId = target.dataset.ocrDownloadId;
-      if (downloadId) {
+      const downloadButton = target instanceof Element ? target.closest("[data-ocr-download-id]") : null;
+      if (downloadButton instanceof HTMLButtonElement) {
+        const downloadId = downloadButton.dataset.ocrDownloadId;
         const item = ocrQueue.find((entry) => entry.id === downloadId);
         if (!item?.zipId) {
           return;
         }
-        triggerZipDownload(item.zipId, `${item.name}.zip`).catch((err) => {
+        triggerZipDownload(item.zipId, withExtension(item.name, ".ocr.zip")).catch((err) => {
           setConfigMessage(err.message || "ZIP download failed", true);
         });
         return;
       }
-      const removeId = target.dataset.ocrRemoveId;
-      if (removeId) {
+
+      const removeButton = target instanceof Element ? target.closest("[data-ocr-remove-id]") : null;
+      if (removeButton instanceof HTMLButtonElement) {
         if (ocrInFlight) {
+          return;
+        }
+        const removeId = removeButton.dataset.ocrRemoveId;
+        if (!removeId) {
           return;
         }
         ocrQueue = ocrQueue.filter((item) => item.id !== removeId);
@@ -921,10 +994,16 @@ function setupOcrUI() {
         updateOcrVisibility();
         return;
       }
-      const itemId = target.dataset.ocrItemId;
+
+      const rowButton = target instanceof Element ? target.closest("[data-ocr-item-id]") : null;
+      if (!(rowButton instanceof HTMLButtonElement)) {
+        return;
+      }
+      const itemId = rowButton.dataset.ocrItemId;
       if (!itemId) {
         return;
       }
+      event.stopPropagation();
       ocrSelectedId = itemId;
       updateOcrVisibility();
     });
@@ -1014,6 +1093,18 @@ function setupOcrUI() {
           continue;
         }
 
+        updateOcrStatus(`Checking OCR server ${index + 1}/${ocrQueue.length}...`);
+        try {
+          await ensureOcrServerReady();
+        } catch (err) {
+          item.status = "error";
+          item.error = `Server unavailable: ${err.message || "OCR service check failed"}`;
+          errors += 1;
+          updateOcrVisibility();
+          setOcrError("OCR server unavailable. Check the Reader service status.");
+          continue;
+        }
+
         item.status = "processing";
         ocrSelectedId = item.id;
         updateOcrVisibility();
@@ -1066,6 +1157,13 @@ function setupOcrUI() {
 
       const summary = `${done} done${errors ? `, ${errors} error` : ""}${canceled ? `, ${canceled} canceled` : ""}`;
       setConfigMessage(summary, errors > 0);
+      if (errors > 0) {
+        setOcrError(`${errors} file${errors > 1 ? "s" : ""} failed. Select a file to see details.`);
+      } else if (canceled > 0) {
+        setOcrError("OCR canceled");
+      } else {
+        setOcrError("");
+      }
     } catch (err) {
       const message = err.name === "AbortError" ? "OCR canceled" : err.message || "OCR extraction failed";
       setConfigMessage(message, true);
@@ -1124,7 +1222,7 @@ function setupOcrUI() {
     }
 
     try {
-      await triggerZipDownload(item.zipId, `${item.name}.zip`);
+      await triggerZipDownload(item.zipId, withExtension(item.name, ".ocr.zip"));
 
       setConfigMessage("OCR ZIP downloaded");
     } catch (err) {

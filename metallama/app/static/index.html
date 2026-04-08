@@ -106,14 +106,16 @@
           <p>Drop a PDF or an image and extract the content as markdown.</p>
         </div>
 
+        <p id="ocr-error" class="transcript-error" aria-live="polite"></p>
+
         <form id="ocr-form" class="transcript-form ocr-workspace">
           <div class="ocr-left-stack">
             <section class="ocr-left-card ocr-drop-card">
-              <label class="file-drop" for="ocr-file">
+              <div class="file-drop ocr-drop-zone" tabindex="0" role="button" aria-label="Add OCR documents">
                 <input id="ocr-file" name="ocr-file" type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" multiple />
                 <span class="file-drop-label">Add documents [+]</span>
-              </label>
-              <ul id="ocr-queue-list" class="ocr-queue-list"></ul>
+                <ul id="ocr-queue-list" class="ocr-queue-list"></ul>
+              </div>
               <div class="ocr-drop-actions">
                 <button id="ocr-clear-btn" class="btn-secondary btn-small is-hidden" type="button">Clear</button>
               </div>
@@ -158,8 +160,6 @@
             </div>
           </div>
         </form>
-
-        <p id="ocr-error" class="transcript-error" aria-live="polite"></p>
 
       </section>
     </main>

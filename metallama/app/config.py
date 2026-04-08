@@ -19,6 +19,8 @@ class Config:
     MINERU_HF_HOME = os.getenv("METALLAMA_MINERU_HF_HOME")
     MINERU_HF_HUB_CACHE = os.getenv("METALLAMA_MINERU_HF_HUB_CACHE")
     BASE_URL = os.getenv("METALLAMA_BASE_URL", "http://gpu4.hygeos.com")
+    OUTPUT_RETENTION_HOURS = int(os.getenv("METALLAMA_OUTPUT_RETENTION_HOURS", "12"))
+    OUTPUT_MAX_ENTRIES = int(os.getenv("METALLAMA_OUTPUT_MAX_ENTRIES", "60"))
 
 
 APP_DIR = Path(__file__).resolve().parent

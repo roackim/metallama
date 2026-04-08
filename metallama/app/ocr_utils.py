@@ -206,7 +206,7 @@ async def request_mineru_zip(
 
     stem = Path(filename).stem
     zip_id = uuid.uuid4().hex
-    _zip_store[zip_id] = (raw, f"{stem}_ocr.zip")
+    _zip_store[zip_id] = (raw, f"{stem}.ocr.zip")
 
     return markdown, zip_id, image_count
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import io
 import shlex
+import shutil
 import signal
 import subprocess
 import time
@@ -14,7 +15,7 @@ from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from .config import STATIC_DIR, Config
+from .config import PROJECT_ROOT, STATIC_DIR, Config
 from .models import ProcessState
 from .ocr_utils import get_zip, request_mineru_markdown, request_mineru_zip
 from .profiles import MODEL_PROFILES
@@ -41,6 +42,52 @@ app = FastAPI(title="metallama")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 transcript_semaphore = asyncio.Semaphore(1)
+
+
+def cleanup_output_directory(retention_hours: int, max_entries: int) -> None:
+    output_dir = PROJECT_ROOT / "output"
+    if not output_dir.exists() or not output_dir.is_dir():
+        return
+
+    now = time.time()
+    ttl_seconds = max(0, retention_hours) * 3600
+    entries: list[Path] = []
+
+    for path in output_dir.iterdir():
+        try:
+            entries.append(path)
+            if ttl_seconds > 0 and now - path.stat().st_mtime > ttl_seconds:
+                if path.is_dir():
+                    shutil.rmtree(path, ignore_errors=True)
+                else:
+                    path.unlink(missing_ok=True)
+        except OSError:
+            continue
+
+    if max_entries <= 0:
+        return
+
+    try:
+        remaining = [p for p in output_dir.iterdir()]
+    except OSError:
+        return
+
+    if len(remaining) <= max_entries:
+        return
+
+    try:
+        remaining.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    except OSError:
+        return
+
+    for stale in remaining[max_entries:]:
+        try:
+            if stale.is_dir():
+                shutil.rmtree(stale, ignore_errors=True)
+            else:
+                stale.unlink(missing_ok=True)
+        except OSError:
+            continue
 
 
 @app.get("/")
@@ -267,25 +314,32 @@ async def ocr_parse(
 
     content_type = file.content_type or "application/octet-stream"
 
-    if extract_images:
-        markdown, zip_id, image_count = await request_mineru_zip(
+    try:
+        if extract_images:
+            markdown, zip_id, image_count = await request_mineru_zip(
+                file_bytes=file_bytes,
+                filename=filename,
+                content_type=content_type,
+                parse_method=parse_method,
+                backend=Config.MINERU_BACKEND,
+            )
+            return {"filename": filename, "markdown": markdown, "zip_id": zip_id, "image_count": image_count}
+
+        markdown = await request_mineru_markdown(
             file_bytes=file_bytes,
             filename=filename,
             content_type=content_type,
             parse_method=parse_method,
             backend=Config.MINERU_BACKEND,
         )
-        return {"filename": filename, "markdown": markdown, "zip_id": zip_id, "image_count": image_count}
 
-    markdown = await request_mineru_markdown(
-        file_bytes=file_bytes,
-        filename=filename,
-        content_type=content_type,
-        parse_method=parse_method,
-        backend=Config.MINERU_BACKEND,
-    )
-
-    return {"filename": filename, "markdown": markdown}
+        return {"filename": filename, "markdown": markdown}
+    finally:
+        await asyncio.to_thread(
+            cleanup_output_directory,
+            Config.OUTPUT_RETENTION_HOURS,
+            Config.OUTPUT_MAX_ENTRIES,
+        )
 
 
 @app.get("/api/ocr/zip/{zip_id}")
@@ -323,7 +377,7 @@ def download_ocr_zip_bundle(payload: dict[str, Any] = Body(...)) -> StreamingRes
             zip_bytes, zip_name = entry
             file_name = str(item.get("file_name") or "").strip()
             if file_name:
-                safe_name = f"{Path(file_name).stem}.zip"
+                safe_name = f"{Path(file_name).stem}.ocr.zip"
             else:
                 safe_name = zip_name
             safe_name = Path(safe_name).name or f"ocr_{count + 1:04d}.zip"
