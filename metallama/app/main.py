@@ -336,6 +336,34 @@ def model_command_preview(model_id: str) -> dict[str, str]:
     return {"command": shlex.join(command)}
 
 
+@app.post("/api/models/{model_id}/config")
+async def update_model_config(model_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    from .config import update_server_config, get_server_config
+    
+    profile = MODEL_PROFILES.get(model_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Unknown model id")
+    
+    # Check if server is running - only allow changes when stopped
+    async with model_locks[model_id]:
+        cleanup_dead(model_id)
+        state = runtime_processes.get(model_id)
+        if state and is_alive(state.process):
+            raise HTTPException(status_code=409, detail="Cannot change config while server is running")
+    
+    # Validate and update context_window if provided
+    if "context_window" in payload:
+        context_window = payload["context_window"]
+        if not isinstance(context_window, int) or context_window < 1:
+            raise HTTPException(status_code=400, detail="context_window must be a positive integer")
+        
+        update_server_config(model_id, {"context_window": context_window})
+    
+    # Return updated config
+    updated_config = get_server_config(model_id)
+    return {"ok": True, "config": updated_config}
+
+
 @app.post("/api/transcript/stream")
 async def transcript_stream(
     file: UploadFile = File(...),

@@ -12,13 +12,26 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from .config import Config
+from .config import Config, get_server_config
 from .models import ModelProfile, ProcessState
 from .profiles import MODEL_PROFILES
 
 
 runtime_processes: dict[str, ProcessState] = {}
 model_locks: dict[str, asyncio.Lock] = {key: asyncio.Lock() for key in MODEL_PROFILES}
+
+
+def get_profile_with_config(profile: ModelProfile) -> ModelProfile:
+    """Get a profile with the latest context_window from server_configs.json."""
+    config = get_server_config(profile.id)
+    context_window = config.get("context_window")
+    
+    if context_window is not None and context_window != profile.context_window:
+        # Create a new profile with updated context_window
+        from dataclasses import replace
+        return replace(profile, context_window=context_window)
+    
+    return profile
 
 
 def mineru_runtime_env() -> dict[str, str]:
@@ -80,6 +93,9 @@ def resolve_mineru_binary() -> str:
 
 
 def build_command(profile: ModelProfile) -> list[str]:
+    # Get the profile with latest context_window from config
+    profile = get_profile_with_config(profile)
+    
     if profile.engine == "whisper":
         binary = Config.EXECUTABLE_WHISPER
     elif profile.engine == "mineru":
@@ -98,6 +114,25 @@ def build_command(profile: ModelProfile) -> list[str]:
     for arg in profile.extra_args:
         parts = shlex.split(arg)
         normalized_extra_args.extend(parts if parts else [arg])
+
+    # For llama servers, override --ctx-size if context_window is configured
+    if profile.engine == "llama" and profile.context_window is not None:
+        # Remove any existing --ctx-size argument
+        filtered_args = []
+        skip_next = False
+        for i, arg in enumerate(normalized_extra_args):
+            if skip_next:
+                skip_next = False
+                continue
+            if arg == "--ctx-size":
+                skip_next = True
+                continue
+            if arg.startswith("--ctx-size="):
+                continue
+            filtered_args.append(arg)
+        normalized_extra_args = filtered_args
+        # Add the configured context window
+        normalized_extra_args.extend(["--ctx-size", str(profile.context_window)])
 
     if profile.engine == "mineru":
         return [
@@ -144,6 +179,9 @@ def status_for(profile: ModelProfile) -> str:
 
 
 def model_payload(profile: ModelProfile) -> dict[str, Any]:
+    # Get the profile with latest context_window from config
+    profile = get_profile_with_config(profile)
+    
     status = status_for(profile)
     state = runtime_processes.get(profile.id)
     return {
@@ -158,4 +196,5 @@ def model_payload(profile: ModelProfile) -> dict[str, Any]:
         "url": f"{Config.BASE_URL}:{profile.port}",
         "status": status,
         "pid": state.process.pid if state and status == "running" else None,
+        "context_window": profile.context_window,
     }

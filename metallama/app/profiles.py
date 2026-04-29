@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .config import get_server_config
 from .models import ModelProfile
 
 
@@ -12,7 +13,7 @@ MODEL_PROFILES: dict[str, ModelProfile] = {
         family="Qwen 3.5",
         size="27B",
         description="Primary coding model for chat and generation tasks.",
-        model_path="/envs/local/llm/models/Qwen3.5-27B-Q8_0.gguf",
+        model_path="/envs/local/llm/models/Qwen3.6-27B-Q8_0.gguf",
         port=8011,
         extra_args=[
             "--ctx-size 229376",
@@ -22,9 +23,10 @@ MODEL_PROFILES: dict[str, ModelProfile] = {
             "--top-p 0.95",
             "--top-k 20",
             "--min-p 0.00",
-            "--presence_penalty 1.5",
+            "--presence_penalty 0.0",
             "--repeat-penalty 1.0",
         ],
+        context_window=get_server_config("llamacpp-coding").get("context_window"),
     ),
     "whisper-audio": ModelProfile(
         id="whisper-audio",
@@ -37,6 +39,7 @@ MODEL_PROFILES: dict[str, ModelProfile] = {
         model_path="/local_home/debian/llm/whisper.cpp/models/ggml-large-v3-turbo.bin",
         port=8012,
         extra_args=[],
+        context_window=None,
     ),
     "mineru-ocr": ModelProfile(
         id="mineru-ocr",
@@ -49,5 +52,6 @@ MODEL_PROFILES: dict[str, ModelProfile] = {
         model_path="",
         port=8013,
         extra_args=[],
+        context_window=None,
     ),
 }

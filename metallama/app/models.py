@@ -17,6 +17,7 @@ class ModelProfile:
     model_path: str | Path
     port: int
     extra_args: list[str]
+    context_window: int | None = None
 
 
 @dataclass

@@ -182,6 +182,29 @@ function cardTemplate(model) {
   const overlayClass = isLoading ? "panel-overlay card-overlay" : "panel-overlay card-overlay is-hidden";
   const statusText = action === "start" ? "Starting..." : "Stopping...";
 
+  // Context window display for LLM servers
+  const isLLM = type === "LLM";
+  const isStopped = model.status === "stopped";
+  const ctxValue = model.context_window || "";
+  const ctxKTokens = ctxValue ? Math.round(ctxValue / 1000) : "";
+  const ctxDisplay = isLLM ? (isStopped ? `
+    <span class="info-item ctx-editable" data-model-id="${model.id}">
+      CTX: <input 
+        type="number" 
+        class="ctx-inline-input" 
+        data-model-id="${model.id}" 
+        data-original-value="${ctxValue}"
+        value="${ctxKTokens}" 
+        min="1" 
+        step="1"
+        placeholder="Auto"
+        title="Context window in k tokens (editable when stopped)"
+      />k
+    </span>
+  ` : `
+    <span class="info-item">CTX: ${ctxKTokens}k</span>
+  `) : "";
+
   return `
     <article class="card ${model.status}" data-model-id="${model.id}" style="--card-accent: ${accent}">
       <div class="card-header-row">
@@ -203,6 +226,7 @@ function cardTemplate(model) {
           <div class="info-row">
             <span class="info-item">PORT: ${model.port}</span>
             <span class="info-item">PID: ${model.pid ?? "-"}</span>
+            ${ctxDisplay}
             <button class="btn-secondary btn-small" data-id="${model.id}" data-action="cmd" title="Copy launch command">CMD</button>
           </div>
         </div>
@@ -234,6 +258,12 @@ function renderModels(models) {
 }
 
 async function refreshModels() {
+  // Don't refresh if user is editing a context input field
+  const activeElement = document.activeElement;
+  if (activeElement && activeElement.classList.contains("ctx-inline-input")) {
+    return;
+  }
+  
   const data = await api("/api/models");
   renderModels(data.models || []);
 }
@@ -340,6 +370,134 @@ modelsEl.addEventListener("click", async (event) => {
     setConfigMessage(err.message, true);
   }
 });
+
+// Handle context window input changes
+modelsEl.addEventListener("input", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement) || !target.classList.contains("ctx-inline-input")) {
+    return;
+  }
+
+  const modelId = target.dataset.modelId;
+  if (!modelId) {
+    return;
+  }
+
+  // No need to change button text since we're in stopped state
+});
+
+// Save context window on blur (when user leaves the field)
+modelsEl.addEventListener("blur", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement) || !target.classList.contains("ctx-inline-input")) {
+    return;
+  }
+
+  const modelId = target.dataset.modelId;
+  const kTokens = parseInt(target.value, 10);
+
+  if (!modelId || isNaN(kTokens) || kTokens < 1) {
+    return;
+  }
+
+  const newValue = kTokens * 1000;
+
+  try {
+    await api(`/api/models/${modelId}/config`, {
+      method: "POST",
+      body: JSON.stringify({ context_window: newValue }),
+    });
+    
+    // Update the original value so we know it's been saved
+    target.dataset.originalValue = String(newValue);
+    setConfigMessage("Context window updated");
+    
+    // Delay refresh to allow click events to process first
+    setTimeout(() => {
+      refreshModels().catch(() => {});
+    }, 100);
+  } catch (err) {
+    setCardError(modelId, `Failed to save context: ${err.message}`);
+    setTimeout(() => {
+      refreshModels().catch(() => {});
+    }, 100);
+  }
+}, true);
+
+// Handle Enter key to validate context window input
+modelsEl.addEventListener("keydown", async (event) => {
+  if (event.key !== "Enter") {
+    return;
+  }
+
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement) || !target.classList.contains("ctx-inline-input")) {
+    return;
+  }
+
+  event.preventDefault();
+  target.blur(); // Trigger blur event which saves the value
+});
+
+async function restartModel(modelId) {
+  // Stop then start
+  inFlight.add(modelId);
+  await refreshModels();
+  
+  try {
+    // Stop
+    await api(`/api/models/${modelId}/stop`, { method: "POST" });
+    setCardError(modelId, "");
+    
+    // Wait for it to stop
+    for (let i = 0; i < 60; i++) {
+      const data = await api(`/api/models/${modelId}/status`);
+      if (data.status === "stopped") {
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    
+    // Start
+    await api(`/api/models/${modelId}/start`, { method: "POST" });
+    
+    // Wait for it to start
+    for (let i = 0; i < 60; i++) {
+      const data = await api(`/api/models/${modelId}/status`);
+      if (data.status === "running") {
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  } finally {
+    inFlight.delete(modelId);
+    await refreshModels();
+  }
+}
+
+async function startStop(modelId, action) {
+  if (action === "restart") {
+    return await restartModel(modelId);
+  }
+  
+  const targetStatus = action === "start" ? "running" : "stopped";
+  inFlight.add(modelId);
+  await refreshModels();
+  try {
+    await api(`/api/models/${modelId}/${action}`, { method: "POST" });
+    setCardError(modelId, "");
+    for (let i = 0; i < 60; i++) {
+      const data = await api(`/api/models/${modelId}/status`);
+      if (data.status === targetStatus) {
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  } finally {
+    inFlight.delete(modelId);
+    await refreshModels();
+  }
+}
 
 async function init() {
   setupThemeSwitcher();
