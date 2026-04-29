@@ -4,8 +4,8 @@ from .models import ModelProfile
 
 
 MODEL_PROFILES: dict[str, ModelProfile] = {
-    "qwen35-27b-code": ModelProfile(
-        id="qwen35-27b-code",
+    "llamacpp-coding": ModelProfile(
+        id="llamacpp-coding",
         display_name="Assistant",
         engine="llama",
         service="LLM",
@@ -26,8 +26,8 @@ MODEL_PROFILES: dict[str, ModelProfile] = {
             "--repeat-penalty 1.0",
         ],
     ),
-    "whisper-large-v3": ModelProfile(
-        id="whisper-large-v3",
+    "whisper-audio": ModelProfile(
+        id="whisper-audio",
         display_name="Scribe",
         engine="whisper",
         service="AUDIO",
