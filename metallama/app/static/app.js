@@ -4,6 +4,9 @@ const summaryEl = document.getElementById("summary");
 const themeButtons = document.querySelectorAll(".theme-btn");
 const heroLogoEl = document.getElementById("hero-logo");
 const vramStatusEl = document.getElementById("vram-status");
+const vramGraphEl = document.getElementById("vram-graph");
+const ramStatusEl = document.getElementById("ram-status");
+const ramGraphEl = document.getElementById("ram-graph");
 const transcriptFormEl = document.getElementById("transcript-form");
 const audioFileEl = document.getElementById("audio-file");
 const fileLabelEl = document.querySelector(".service-audio .file-drop-label");
@@ -44,6 +47,11 @@ const OCR_QUEUE_ARCHIVE_ICON_SVG = '<svg class="ocr-queue-file-icon" width="13" 
 const OCR_QUEUE_DOWNLOAD_ICON_SVG = '<svg class="ocr-queue-action-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>';
 
 const THEME_KEY = "metallama.theme";
+
+// VRAM/RAM history configuration
+const VRAM_MAX_SAMPLES = 500; // Configurable: 500 samples at 1s = ~8 minutes. Set to 86400 for 24h
+const vramHistory = [];
+const ramHistory = [];
 
 let inFlight = new Set();
 let transcriptionInFlight = false;
@@ -144,6 +152,14 @@ function applyTheme(themePreference) {
     const isActive = button.dataset.theme === themePreference;
     button.classList.toggle("active", isActive);
   });
+  
+  // Redraw graphs with new theme colors
+  if (vramHistory.length > 0) {
+    drawVramGraph();
+  }
+  if (ramHistory.length > 0) {
+    drawRamGraph();
+  }
 }
 
 function setupThemeSwitcher() {
@@ -505,12 +521,14 @@ async function init() {
   setupOcrUI();
   await refreshModels();
   await refreshVram();
+  await refreshRam();
   setInterval(() => {
     refreshModels().catch(() => {});
   }, 2000);
   setInterval(() => {
     refreshVram().catch(() => {});
-  }, 3000);
+    refreshRam().catch(() => {});
+  }, 1000);
 }
 
 async function refreshVram() {
@@ -527,9 +545,129 @@ async function refreshVram() {
     const avgPercent = data.gpus.reduce((sum, gpu) => sum + gpu.percent, 0) / data.gpus.length;
     
     vramStatusEl.textContent = `VRAM: ${totalUsed.toFixed(1)} GB / ${totalMax.toFixed(1)} GB (${avgPercent.toFixed(0)}%)`;
+    
+    // Store history for graphing
+    vramHistory.push({
+      timestamp: Date.now(),
+      percent: avgPercent,
+      used_gb: totalUsed,
+      total_gb: totalMax
+    });
+    
+    // Keep only last VRAM_MAX_SAMPLES samples
+    if (vramHistory.length > VRAM_MAX_SAMPLES) {
+      vramHistory.shift();
+    }
+    
+    drawVramGraph();
   } catch (err) {
     vramStatusEl.textContent = "VRAM: --";
   }
+}
+
+async function refreshRam() {
+  try {
+    const data = await api("/api/system/ram");
+    if (!data.available) {
+      ramStatusEl.textContent = "RAM: N/A";
+      return;
+    }
+    
+    ramStatusEl.textContent = `RAM: ${data.used_gb.toFixed(1)} GB / ${data.total_gb.toFixed(1)} GB (${data.percent.toFixed(0)}%)`;
+    
+    // Store history for graphing
+    ramHistory.push({
+      timestamp: Date.now(),
+      percent: data.percent,
+      used_gb: data.used_gb,
+      total_gb: data.total_gb
+    });
+    
+    // Keep only last samples
+    if (ramHistory.length > VRAM_MAX_SAMPLES) {
+      ramHistory.shift();
+    }
+    
+    drawRamGraph();
+  } catch (err) {
+    ramStatusEl.textContent = "RAM: --";
+  }
+}
+
+function drawGraph(canvas, history, colors) {
+  if (!canvas || history.length < 2) {
+    return;
+  }
+  
+  const ctx = canvas.getContext("2d");
+  const width = canvas.width;
+  const height = canvas.height;
+  const padding = 2;
+  
+  // Clear canvas
+  ctx.clearRect(0, 0, width, height);
+  
+  // Get theme colors
+  const isDark = document.documentElement.dataset.theme === "dark";
+  const gridColor = isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.1)";
+  
+  // Draw background grid lines (25%, 50%, 75%, 100%)
+  ctx.strokeStyle = gridColor;
+  ctx.lineWidth = 1;
+  [0.25, 0.5, 0.75, 1.0].forEach(pct => {
+    const y = height - (pct * (height - 2 * padding)) - padding;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(width, y);
+    ctx.stroke();
+  });
+  
+  // Calculate points - scroll right to left
+  // Show most recent data on the right side
+  const numSamples = history.length;
+  const pixelsPerSample = width / VRAM_MAX_SAMPLES;
+  
+  const points = history.map((sample, index) => {
+    // Position from right: most recent sample at rightmost position
+    const x = width - ((numSamples - index) * pixelsPerSample);
+    const y = height - ((sample.percent / 100) * (height - 2 * padding)) - padding;
+    return { x, y, percent: sample.percent };
+  });
+  
+  // Draw filled area under the line
+  ctx.fillStyle = colors.fill;
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, height);
+  points.forEach(point => ctx.lineTo(point.x, point.y));
+  ctx.lineTo(points[points.length - 1].x, height);
+  ctx.closePath();
+  ctx.fill();
+  
+  // Draw line
+  ctx.strokeStyle = colors.line;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  points.forEach(point => ctx.lineTo(point.x, point.y));
+  ctx.stroke();
+}
+
+function drawVramGraph() {
+  const isDark = document.documentElement.dataset.theme === "dark";
+  const colors = {
+    line: isDark ? "#60a5fa" : "#2563eb",
+    fill: isDark ? "rgba(96, 165, 250, 0.1)" : "rgba(37, 99, 235, 0.1)"
+  };
+  drawGraph(vramGraphEl, vramHistory, colors);
+}
+
+function drawRamGraph() {
+  const isDark = document.documentElement.dataset.theme === "dark";
+  const colors = {
+    line: isDark ? "#f59e0b" : "#d97706",
+    fill: isDark ? "rgba(245, 158, 11, 0.1)" : "rgba(217, 119, 6, 0.1)"
+  };
+  drawGraph(ramGraphEl, ramHistory, colors);
 }
 
 function updateTranscriptStatus(statusText) {

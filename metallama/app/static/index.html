@@ -166,7 +166,26 @@
     
     <footer class="app-footer">
       <div class="footer-content">
-        <span id="vram-status" class="vram-status">VRAM: --</span>
+        <div class="vram-container">
+          <span id="ram-status" class="ram-status">RAM: --</span>
+          <div class="ram-graph-wrapper">
+            <canvas id="ram-graph" class="ram-graph" width="400" height="60"></canvas>
+            <div class="ram-labels">
+              <span class="ram-label">100%</span>
+              <span class="ram-label">50%</span>
+              <span class="ram-label">0%</span>
+            </div>
+          </div>
+          <span id="vram-status" class="vram-status">VRAM: --</span>
+          <div class="vram-graph-wrapper">
+            <canvas id="vram-graph" class="vram-graph" width="400" height="60"></canvas>
+            <div class="vram-labels">
+              <span class="vram-label">100%</span>
+              <span class="vram-label">50%</span>
+              <span class="vram-label">0%</span>
+            </div>
+          </div>
+        </div>
       </div>
     </footer>
     

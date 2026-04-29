@@ -158,6 +158,24 @@ def get_vram_status() -> dict[str, Any]:
         return {"error": str(exc), "available": False}
 
 
+@app.get("/api/system/ram")
+def get_ram_status() -> dict[str, Any]:
+    """Get current RAM usage."""
+    try:
+        import psutil
+        mem = psutil.virtual_memory()
+        return {
+            "available": True,
+            "used_gb": round(mem.used / (1024**3), 2),
+            "total_gb": round(mem.total / (1024**3), 2),
+            "percent": round(mem.percent, 1),
+        }
+    except ImportError:
+        return {"error": "psutil not installed", "available": False}
+    except Exception as exc:
+        return {"error": str(exc), "available": False}
+
+
 @app.get("/api/models")
 def list_models() -> dict[str, Any]:
     return {"models": [model_payload(profile) for profile in MODEL_PROFILES.values()]}

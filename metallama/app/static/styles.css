@@ -1103,3 +1103,48 @@ button:disabled {
   font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Consolas, 'DejaVu Sans Mono', monospace;
   letter-spacing: 0.02em;
 }
+
+.vram-container {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.vram-graph-wrapper,
+.ram-graph-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.vram-graph,
+.ram-graph {
+  border: var(--border-size) solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+}
+
+.vram-labels,
+.ram-labels {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 60px;
+  padding: 2px 0;
+}
+
+.vram-label,
+.ram-label {
+  font-size: 9px;
+  font-family: ui-monospace, monospace;
+  color: var(--muted);
+  line-height: 1;
+}
+
+.ram-status {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--footer-text);
+  font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Consolas, 'DejaVu Sans Mono', monospace;
+  letter-spacing: 0.02em;
+}
