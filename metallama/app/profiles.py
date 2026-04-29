@@ -14,9 +14,9 @@ MODEL_PROFILES: dict[str, ModelProfile] = {
         size="27B",
         description="Primary coding model for chat and generation tasks.",
         model_path="/envs/local/llm/models/Qwen3.6-27B-Q8_0.gguf",
-        port=8011,
+        port=8080,
         extra_args=[
-            "--ctx-size 229376",
+            # "--ctx-size 229376",
             "--threads 16",
             "--n-gpu-layers 999",
             "--temp 1.0",
