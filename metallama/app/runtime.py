@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import os
-import shlex
 import socket
 import subprocess
 import urllib.error
 import urllib.request
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +20,16 @@ from .profiles import MODEL_PROFILES
 runtime_processes: dict[str, ProcessState] = {}
 model_locks: dict[str, asyncio.Lock] = {key: asyncio.Lock() for key in MODEL_PROFILES}
 
+# Default args prepended before profile extra_args for each engine.
+# Profile extra_args are appended after and take precedence (last flag wins in llama-server).
+ENGINE_DEFAULT_ARGS: dict[str, list[str]] = {
+    "llama": [
+        "--flash-attn on", # Enable flash attention
+        "--threads 4",
+        "--n-gpu-layers 999",
+    ],
+}
+
 
 def get_profile_with_config(profile: ModelProfile) -> ModelProfile:
     """Get a profile with the latest context_window from server_configs.json."""
@@ -27,8 +37,6 @@ def get_profile_with_config(profile: ModelProfile) -> ModelProfile:
     context_window = config.get("context_window")
     
     if context_window is not None and context_window != profile.context_window:
-        # Create a new profile with updated context_window
-        from dataclasses import replace
         return replace(profile, context_window=context_window)
     
     return profile
@@ -92,14 +100,11 @@ def resolve_mineru_binary() -> str:
     return str(binary)
 
 
-def build_command(profile: ModelProfile) -> list[str]:
-    # Get the profile with latest context_window from config
-    profile = get_profile_with_config(profile)
-    
+def _resolve_binary(profile: ModelProfile) -> str:
     if profile.engine == "whisper":
         binary = Config.EXECUTABLE_WHISPER
     elif profile.engine == "mineru":
-        binary = resolve_mineru_binary()
+        return resolve_mineru_binary()
     else:
         binary = Config.EXECUTABLE_LLAMA
 
@@ -110,54 +115,47 @@ def build_command(profile: ModelProfile) -> list[str]:
     if binary_path.is_absolute() and not binary_path.exists():
         raise HTTPException(status_code=400, detail=f"Binary does not exist: {binary}")
 
-    normalized_extra_args: list[str] = []
-    for arg in profile.extra_args:
-        parts = shlex.split(arg)
-        normalized_extra_args.extend(parts if parts else [arg])
+    return binary
 
-    # For llama servers, override --ctx-size if context_window is configured
+
+def _strip_flag(args: list[str], flag: str) -> list[str]:
+    result: list[str] = []
+    skip_next = False
+    for arg in args:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg == flag:
+            skip_next = True
+            continue
+        if arg.startswith(f"{flag}="):
+            continue
+        result.append(arg)
+    return result
+
+
+def build_command(profile: ModelProfile) -> list[str]:
+    profile = get_profile_with_config(profile)
+    binary = _resolve_binary(profile)
+
+    extra_args = [
+        token
+        for arg in ENGINE_DEFAULT_ARGS.get(profile.engine, []) + list(profile.extra_args)
+        for token in arg.split()
+    ]
+
     if profile.engine == "llama" and profile.context_window is not None:
-        # Remove any existing --ctx-size argument
-        filtered_args = []
-        skip_next = False
-        for i, arg in enumerate(normalized_extra_args):
-            if skip_next:
-                skip_next = False
-                continue
-            if arg == "--ctx-size":
-                skip_next = True
-                continue
-            if arg.startswith("--ctx-size="):
-                continue
-            filtered_args.append(arg)
-        normalized_extra_args = filtered_args
-        # Add the configured context window
-        normalized_extra_args.extend(["--ctx-size", str(profile.context_window)])
+        extra_args = _strip_flag(extra_args, "--ctx-size")
+        extra_args += ["--ctx-size", str(profile.context_window)]
 
     if profile.engine == "mineru":
-        return [
-            str(binary),
-            "--host",
-            "0.0.0.0",
-            "--port",
-            str(profile.port),
-            *normalized_extra_args,
-        ]
+        return [binary, "--host", "0.0.0.0", "--port", str(profile.port), *extra_args]
 
     model_path = Path(profile.model_path)
     if not model_path.exists():
         raise HTTPException(status_code=400, detail=f"Model file not found: {profile.model_path}")
 
-    return [
-        str(binary),
-        "--model",
-        str(model_path),
-        "--host",
-        "0.0.0.0",
-        "--port",
-        str(profile.port),
-        *normalized_extra_args,
-    ]
+    return [binary, "--model", str(model_path), "--host", "0.0.0.0", "--port", str(profile.port), *extra_args]
 
 
 def status_for(profile: ModelProfile) -> str:
