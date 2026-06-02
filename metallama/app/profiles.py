@@ -16,7 +16,7 @@ MODEL_PROFILES: dict[str, ModelProfile] = {
         model_path="/envs/local/llm/models/Qwen3.6-27B-Q8_0-MTP.gguf",
         port=8080,
         extra_args=[
-            # "--ctx-size 229376",
+            
             "--temp 1.0",
             "--top-p 0.95",
             "--top-k 20",
@@ -25,13 +25,13 @@ MODEL_PROFILES: dict[str, ModelProfile] = {
             "--repeat-penalty 1.0",
             
             "--parallel 4",
-            "--cont-batching",
+            # "--cont-batching",        # not sure about this option
             "--batch-size 2048",
             "--ubatch-size 512",
             
-            # "--cache-type-k q8_0",
+            # "--cache-type-k q8_0",    # Quantize ?
             # "--cache-type-v q8_0",
-            "--spec-type draft-mtp",   # Enable MTP for better handling of long contexts
+            "--spec-type draft-mtp",    # Enable MTP for better handling of long contexts
             "--spec-draft-n-max 3",
             "--reasoning-budget 1536",  # rather big reasoning budget
         ],
