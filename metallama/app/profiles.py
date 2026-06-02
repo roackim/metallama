@@ -23,6 +23,12 @@ MODEL_PROFILES: dict[str, ModelProfile] = {
             "--min-p 0.00",
             "--presence_penalty 0.0",
             "--repeat-penalty 1.0",
+            
+            "--parallel 4",
+            "--cont-batching",
+            "--batch-size 2048",
+            "--ubatch-size 512",
+            
             # "--cache-type-k q8_0",
             # "--cache-type-v q8_0",
             "--spec-type draft-mtp",   # Enable MTP for better handling of long contexts
