@@ -27,9 +27,3 @@ class ProcessState:
     started_at: float
     command: list[str]
 
-
-@dataclass(frozen=True)
-class AudioChunk:
-    wav_bytes: bytes
-    start_frame: int
-    prefix_skip_seconds: float

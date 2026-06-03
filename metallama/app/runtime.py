@@ -1,11 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import socket
 import subprocess
-import urllib.error
-import urllib.request
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -47,25 +44,6 @@ def get_profile_with_config(profile: ModelProfile) -> ModelProfile:
     return replace(profile, **overrides) if overrides else profile
 
 
-def mineru_runtime_env() -> dict[str, str]:
-    env = os.environ.copy()
-
-    hf_home = Path(Config.MINERU_HF_HOME).expanduser()
-    hf_hub_cache = Path(Config.MINERU_HF_HUB_CACHE).expanduser()
-
-    for path in (hf_home, hf_hub_cache):
-        parent = path.parent
-        if not parent.exists():
-            raise HTTPException(
-                status_code=400,
-                detail=f"MinerU cache parent does not exist: {parent}",
-            )
-        path.mkdir(exist_ok=True)
-
-    env["HF_HOME"] = str(hf_home)
-    env["HUGGINGFACE_HUB_CACHE"] = str(hf_hub_cache)
-    return env
-
 
 def is_alive(proc: subprocess.Popen[str]) -> bool:
     return proc.poll() is None
@@ -85,33 +63,10 @@ def is_port_open(host: str, port: int, timeout: float = 0.3) -> bool:
         return False
 
 
-def is_whisper_ready(port: int, timeout: float = 0.5) -> bool:
-    try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=timeout) as response:
-            return 200 <= response.status < 300
-    except (urllib.error.URLError, TimeoutError, OSError):
-        return False
-
-
-def resolve_mineru_binary() -> str:
-    venv_path = Config.EXECUTABLE_MINERU_VENV.strip()
-    if not venv_path:
-        raise HTTPException(status_code=400, detail="METALLAMA_MINERU_VENV is not configured")
-
-    binary = Path(venv_path) / "bin" / "mineru-api"
-    if not binary.exists():
-        raise HTTPException(status_code=400, detail=f"MinerU executable not found: {binary}")
-
-    return str(binary)
 
 
 def _resolve_binary(profile: ModelProfile) -> str:
-    if profile.engine == "whisper":
-        binary = Config.EXECUTABLE_WHISPER
-    elif profile.engine == "mineru":
-        return resolve_mineru_binary()
-    else:
-        binary = Config.EXECUTABLE_LLAMA
+    binary = Config.EXECUTABLE_LLAMA
 
     if not binary:
         raise HTTPException(status_code=400, detail=f"{profile.engine} binary is empty")
@@ -158,8 +113,6 @@ def build_command(profile: ModelProfile) -> list[str]:
         extra_args = _strip_flag(extra_args, "--parallel")
         extra_args += ["--parallel", str(profile.parallel)]
 
-    if profile.engine == "mineru":
-        return [binary, "--host", "0.0.0.0", "--port", str(profile.port), *extra_args]
 
     model_path = Path(profile.model_path)
     if not model_path.exists():
@@ -172,16 +125,10 @@ def status_for(profile: ModelProfile) -> str:
     cleanup_dead(profile.id)
     state = runtime_processes.get(profile.id)
 
-    if profile.engine == "mineru":
-        return "running" if is_port_open("127.0.0.1", profile.port) else "stopped"
-
     if not state:
         return "stopped"
     if not is_alive(state.process):
         return "stopped"
-
-    if profile.engine == "whisper":
-        return "running" if is_whisper_ready(profile.port) else "starting"
 
     return "running" if is_port_open("127.0.0.1", profile.port) else "starting"
 

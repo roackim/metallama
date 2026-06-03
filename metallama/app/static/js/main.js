@@ -1,7 +1,5 @@
 import { setConfigMessage } from "./core/uiMessage.js";
-import { setupTranscriptUI } from "./features/audio/index.js";
 import { setupModels, refreshModels } from "./features/models/index.js";
-import { setupOcrUI } from "./features/ocr/index.js";
 import { refreshRam, refreshRamGraph, refreshVram, refreshVramGraph } from "./features/system/index.js";
 import { setupThemeSwitcher } from "./features/theme/index.js";
 
@@ -12,8 +10,6 @@ async function init() {
   });
 
   setupModels();
-  setupTranscriptUI();
-  setupOcrUI();
 
   await refreshModels();
   await refreshVram();

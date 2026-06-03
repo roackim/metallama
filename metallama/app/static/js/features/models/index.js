@@ -30,22 +30,12 @@ function canStop(model) {
 
 function modelTypeLabel(model) {
   const normalized = String(model.service || "").trim().toUpperCase();
-  if (["LLM", "AUDIO", "DOCS", "OCR"].includes(normalized)) {
-    return normalized;
-  }
-
-  if (model.engine === "whisper") {
-    return "AUDIO";
-  }
-  if (model.engine === "mineru") {
-    return "OCR";
-  }
+  if (normalized === "LLM") return "LLM";
   return "LLM";
 }
 
 function cardAccentColor(type) {
-  const colors = { LLM: "#3B95DD", AUDIO: "#F4A501", OCR: "#8EC561", DOCS: "#8EC561" };
-  return colors[type] || "var(--line)";
+  return "#3B95DD";
 }
 
 function cardTemplate(model) {
