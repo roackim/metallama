@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import shlex
 import signal
 import subprocess
 import time
@@ -22,7 +21,9 @@ from .ollama.routes.ollama import router as ollama_router
 from .ollama.routes.openai import router as openai_router
 from .profiles import MODEL_PROFILES
 from .runtime import (
+    binary_health,
     build_command,
+    build_command_preview,
     cleanup_dead,
     is_alive,
     model_locks,
@@ -68,6 +69,14 @@ def get_config() -> dict[str, str]:
     return {
         "EXECUTABLE_LLAMA": str(Config.EXECUTABLE_LLAMA),
         "BASE_URL": str(Config.BASE_URL),
+    }
+
+
+@app.get("/api/health")
+def health_check() -> dict[str, Any]:
+    """Return health status including binary availability."""
+    return {
+        "binaries": binary_health(),
     }
 
 
@@ -335,12 +344,18 @@ def stop_all_on_shutdown() -> None:
 
 
 @app.get("/api/models/{model_id}/command")
-def model_command_preview(model_id: str) -> dict[str, str]:
+def model_command_preview(model_id: str) -> dict[str, Any]:
     profile = MODEL_PROFILES.get(model_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Unknown model id")
-    command = build_command(profile)
-    return {"command": shlex.join(command)}
+    command, binary_found = build_command_preview(profile)
+    # Split compound args like "--temp 1.0" into individual tokens, then join.
+    # All values come from trusted config, so plain space-join is safe.
+    tokens = [token for arg in command for token in arg.split()]
+    return {
+        "command": " ".join(tokens),
+        "binary_found": binary_found,
+    }
 
 
 @app.post("/api/models/{model_id}/config")

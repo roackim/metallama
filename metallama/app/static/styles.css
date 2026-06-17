@@ -2,6 +2,10 @@
   box-sizing: border-box;
 }
 
+.is-hidden {
+  display: none !important;
+}
+
 :root {
   --bg:         #e5e7eb;
   --panel:      #ffffff;
@@ -612,6 +616,47 @@ button:disabled {
 .info-banner-desc {
   color: var(--muted);
   line-height: 1.4;
+}
+
+/* ── Binary Warning Banner ─────────────────────────────── */
+.binary-warning {
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  border-left: 4px solid #f59e0b;
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+  color: #92400e;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+.binary-warning .warning-icon {
+  flex-shrink: 0;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+.binary-warning .warning-text {
+  flex: 1;
+}
+.binary-warning .warning-text strong {
+  display: block;
+  margin-bottom: 2px;
+}
+.binary-warning .warning-text code {
+  background: rgba(0,0,0,0.06);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.82rem;
+}
+:root[data-theme="dark"] .binary-warning {
+  background: #422006;
+  border-color: #92400e;
+  color: #fbbf24;
+}
+:root[data-theme="dark"] .binary-warning .warning-text code {
+  background: rgba(255,255,255,0.08);
 }
 
 .ui-message {

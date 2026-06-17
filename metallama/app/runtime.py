@@ -82,6 +82,61 @@ def _resolve_binary(profile: ModelProfile) -> str:
     return binary
 
 
+def _binary_exists(path: str) -> bool:
+    """Check if a binary path exists, catching PermissionError from inaccessible parent dirs."""
+    try:
+        return Path(path).exists()
+    except (PermissionError, OSError):
+        return False
+
+
+def _resolve_binary_or_placeholder(profile: ModelProfile) -> tuple[str, bool]:
+    """Resolve binary path, returning (path, found). Returns placeholder if not found."""
+    binary = Config.EXECUTABLE_LLAMA
+
+    if not binary:
+        return (f"<{profile.engine}-binary>", False)
+
+    binary_path = Path(binary)
+    if binary_path.is_absolute() and not _binary_exists(binary):
+        return (binary, False)
+
+    return (binary, True)
+
+
+def binary_health() -> dict:
+    """Return binary availability status for all engines."""
+    binary = Config.EXECUTABLE_LLAMA
+    if not binary:
+        return {"llama": {"found": False, "path": "", "reason": "METALLAMA_LLAMACPP_BINARY not set"}}
+
+    if not _binary_exists(binary):
+        return {"llama": {"found": False, "path": binary, "reason": f"Binary not found or not accessible at {binary}"}}
+
+    return {"llama": {"found": True, "path": binary, "reason": ""}}
+
+
+def build_command_preview(profile: ModelProfile) -> tuple[list[str], bool]:
+    """Build command for preview/clipboard. Returns (command, binary_found)."""
+    profile = get_profile_with_config(profile)
+    binary, found = _resolve_binary_or_placeholder(profile)
+
+    extra_args = (
+        _get_engine_default_args(profile.engine) + list(profile.extra_args)
+    )
+
+    if profile.engine == "llama" and profile.context_window is not None:
+        extra_args = _strip_flag(extra_args, "--ctx-size")
+        total_ctx = profile.context_window * profile.parallel
+        extra_args += ["--ctx-size", str(total_ctx)]
+
+    if profile.engine == "llama" and profile.parallel is not None:
+        extra_args = _strip_flag(extra_args, "--parallel")
+        extra_args += ["--parallel", str(profile.parallel)]
+
+    return ([binary, "--model", str(profile.model_path), "--host", "0.0.0.0", "--port", str(profile.port), *extra_args], found)
+
+
 def _strip_flag(args: list[str], flag: str) -> list[str]:
     result: list[str] = []
     skip_next = False
