@@ -9,37 +9,41 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from .config import Config, get_server_config
+from .config import Config
 from .models import ModelProfile, ProcessState
 from .profiles import MODEL_PROFILES
+from .unified_config import load_unified_config
 
 
 runtime_processes: dict[str, ProcessState] = {}
 model_locks: dict[str, asyncio.Lock] = {key: asyncio.Lock() for key in MODEL_PROFILES}
 
-# Default args prepended before profile extra_args for each engine.
-# Profile extra_args are appended after and take precedence (last flag wins in llama-server).
-ENGINE_DEFAULT_ARGS: dict[str, list[str]] = {
-    "llama": [
-        "--flash-attn on", # Enable flash attention
-        "--threads 4",
-        "--n-gpu-layers 999",
-    ],
-}
+
+def _get_engine_default_args(engine: str) -> list[str]:
+    """Get default CLI args for an engine from unified config."""
+    config = load_unified_config()
+    defaults = config.engine_defaults.get(engine)
+    if defaults and hasattr(defaults, "to_cli_args"):
+        return defaults.to_cli_args()
+    return []
 
 
 def get_profile_with_config(profile: ModelProfile) -> ModelProfile:
-    """Get a profile with the latest ui-configurable params from server_configs.json."""
-    config = get_server_config(profile.id)
+    """Get a profile with the latest params from unified config.yaml.
+
+    Looks up the managed_server entry by id and applies any overrides
+    for context_window and parallel that may have been updated in config.
+    """
+    unified = load_unified_config()
+    server_entry = next((s for s in unified.managed_servers if s.id == profile.id), None)
+    if not server_entry:
+        return profile
+
     overrides: dict = {}
-
-    context_window = config.get("context_window")
-    if context_window is not None and context_window != profile.context_window:
-        overrides["context_window"] = context_window
-
-    parallel = config.get("parallel")
-    if parallel is not None and parallel != profile.parallel:
-        overrides["parallel"] = parallel
+    if server_entry.context_window is not None and server_entry.context_window != profile.context_window:
+        overrides["context_window"] = server_entry.context_window
+    if server_entry.parallel != profile.parallel:
+        overrides["parallel"] = server_entry.parallel
 
     return replace(profile, **overrides) if overrides else profile
 
@@ -98,11 +102,9 @@ def build_command(profile: ModelProfile) -> list[str]:
     profile = get_profile_with_config(profile)
     binary = _resolve_binary(profile)
 
-    extra_args = [
-        token
-        for arg in ENGINE_DEFAULT_ARGS.get(profile.engine, []) + list(profile.extra_args)
-        for token in arg.split()
-    ]
+    extra_args = (
+        _get_engine_default_args(profile.engine) + list(profile.extra_args)
+    )
 
     if profile.engine == "llama" and profile.context_window is not None:
         extra_args = _strip_flag(extra_args, "--ctx-size")

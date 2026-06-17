@@ -345,7 +345,8 @@ def model_command_preview(model_id: str) -> dict[str, str]:
 
 @app.post("/api/models/{model_id}/config")
 async def update_model_config(model_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
-    from .config import update_server_config, get_server_config
+    from .profiles import reload_model_profiles
+    from .unified_config import update_managed_server, load_unified_config
     
     profile = MODEL_PROFILES.get(model_id)
     if not profile:
@@ -358,21 +359,36 @@ async def update_model_config(model_id: str, payload: dict[str, Any] = Body(...)
         if state and is_alive(state.process):
             raise HTTPException(status_code=409, detail="Cannot change config while server is running")
     
-    # Validate and update context_window if provided
+    updates: dict[str, Any] = {}
+    
+    # Validate and collect context_window if provided
     if "context_window" in payload:
         context_window = payload["context_window"]
         if not isinstance(context_window, int) or context_window < 1:
             raise HTTPException(status_code=400, detail="context_window must be a positive integer")
-        update_server_config(model_id, {"context_window": context_window})
+        updates["context_window"] = context_window
 
-    # Validate and update parallel if provided
+    # Validate and collect parallel if provided
     if "parallel" in payload:
         parallel = payload["parallel"]
         if not isinstance(parallel, int) or parallel < 1:
             raise HTTPException(status_code=400, detail="parallel must be a positive integer")
-        update_server_config(model_id, {"parallel": parallel})
+        updates["parallel"] = parallel
     
-    # Return updated config
-    updated_config = get_server_config(model_id)
-    return {"ok": True, "config": updated_config}
+    if updates:
+        # Update config.yaml (machine-managed section)
+        update_managed_server(model_id, updates)
+        # Reload profiles from disk so changes take effect immediately
+        reload_model_profiles()
+    
+    # Return updated config from unified config
+    unified = load_unified_config()
+    server_entry = next((s for s in unified.managed_servers if s.id == model_id), None)
+    return {
+        "ok": True,
+        "config": {
+            "context_window": server_entry.context_window,
+            "parallel": server_entry.parallel,
+        } if server_entry else {},
+    }
 

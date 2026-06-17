@@ -1,68 +1,54 @@
 from __future__ import annotations
 
-from .config import get_server_config
 from .models import ModelProfile
+from .unified_config import load_unified_config, clear_config_cache
 
 
-MODEL_PROFILES: dict[str, ModelProfile] = {
-    "llamacpp-coding": ModelProfile(
-        id="llamacpp-coding",
-        display_name="Assistant",
-        engine="llama",
-        service="LLM",
-        family="Qwen 3.6",
-        size="27B",
-        description="Primary coding model for chat and generation tasks.",
-        model_path="/envs/local/llm/models/Qwen3.6-27B-Q8_0-MTP.gguf",
-        port=8080,
-        extra_args=[
-            
-            "--temp 1.0",
-            "--top-p 0.95",
-            "--top-k 20",
-            "--min-p 0.00",
-            "--presence_penalty 0.0",
-            "--repeat-penalty 1.0",
-            
-            "--parallel 4",
-            # "--cont-batching",        # not sure about this option
-            "--batch-size 2048",
-            "--ubatch-size 512",
-            
-            # "--cache-type-k q8_0",    # Quantize ?
-            # "--cache-type-v q8_0",
-            "--spec-type draft-mtp",    # Enable MTP for better handling of long contexts
-            "--spec-draft-n-max 3",
-            "--reasoning-budget 1536",  # rather big reasoning budget
-        ],
-        context_window=get_server_config("llamacpp-coding").get("context_window"),
-        parallel=get_server_config("llamacpp-coding").get("parallel") or 4,
-    ),
-    "llamacpp-coding-small": ModelProfile(
-        id="llamacpp-coding-small",
-        display_name="Assistant",
-        engine="llama",
-        service="LLM",
-        family="Qwen 3.6",
-        size="35B-A3B",
-        description="Smaller coding model for simple chat and generation tasks.",
-        model_path="/envs/local/llm/models/Qwen3.6-35B-A3B-UD-Q4_K_XL-MTP.gguf",
-        port=8081,
-        extra_args=[
-            # "--ctx-size 229376",
-            "--temp 0.85",
-            "--top-p 0.95",
-            "--top-k 20",
-            "--min-p 0.00",
-            "--presence_penalty 0.0",
-            "--repeat-penalty 1.0",
-            # "--cache-type-k q8_0",
-            # "--cache-type-v q4_0",
-            "--spec-type draft-mtp",   # Enable MTP for better handling of long contexts
-            "--spec-draft-n-max 2",
-            "--reasoning-budget 768",  # rather small reasoning budget
-        ],
-        context_window=get_server_config("llamacpp-coding-small").get("context_window"),
-        parallel=get_server_config("llamacpp-coding-small").get("parallel") or 4,
-    ),
-}
+def _build_profiles() -> dict[str, ModelProfile]:
+    """Build MODEL_PROFILES dict from unified config.yaml managed_servers section."""
+    config = load_unified_config()
+    profiles: dict[str, ModelProfile] = {}
+    for server in config.managed_servers:
+        profiles[server.id] = ModelProfile(
+            id=server.id,
+            display_name=server.display_name,
+            engine=server.engine,
+            service=server.service,
+            family=server.family,
+            size=server.size,
+            description=server.description,
+            model_path=server.model_path,
+            port=server.port,
+            extra_args=server.extra_args,
+            context_window=server.context_window,
+            parallel=server.parallel,
+        )
+    return profiles
+
+
+_MODEL_PROFILES: dict[str, ModelProfile] = _build_profiles()
+
+
+def get_model_profiles() -> dict[str, ModelProfile]:
+    """Get the current MODEL_PROFILES dict.
+
+    This is a function rather than a bare dict so that callers can get
+    a fresh copy after a config reload.
+    """
+    return _MODEL_PROFILES
+
+
+def reload_model_profiles() -> dict[str, ModelProfile]:
+    """Clear the config cache and rebuild MODEL_PROFILES from disk.
+
+    Call this after updating config.yaml (e.g. from the API endpoint).
+    Returns the new profiles dict.
+    """
+    clear_config_cache()
+    global _MODEL_PROFILES
+    _MODEL_PROFILES = _build_profiles()
+    return _MODEL_PROFILES
+
+
+# Backward-compatible alias: most code just imports MODEL_PROFILES directly.
+MODEL_PROFILES: dict[str, ModelProfile] = _MODEL_PROFILES

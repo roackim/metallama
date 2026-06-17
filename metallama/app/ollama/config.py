@@ -1,28 +1,42 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import yaml
 
+from ..unified_config import load_unified_config
 from .schemas import AppConfig, SubserverConfig
 
 
-def load_config(path: str | os.PathLike = "config.yaml") -> AppConfig:
-    config_path = Path(path)
-    if not config_path.is_absolute():
-        # Resolve relative to this file's directory so the app can be run from anywhere.
-        config_path = Path(__file__).parent / config_path
+def load_config(path: str | Path = "config.yaml") -> AppConfig:
+    """Load subserver config from the unified config.yaml.
 
-    with config_path.open() as fh:
-        raw = yaml.safe_load(fh)
+    Merges managed_servers (owned, local) and remote_servers (distant, hand-edited)
+    into a single flat list of SubserverConfig entries for the ollama registry.
+    """
+    unified = load_unified_config()
+    subservers: list[SubserverConfig] = []
 
-    subservers = []
-    for entry in raw.get("subservers", []):
-        if "url" not in entry:
-            entry["url"] = f"http://localhost:{entry['port']}"
-        subservers.append(SubserverConfig(**entry))
+    # Managed (owned) servers become subservers with localhost URLs.
+    for server in unified.managed_servers:
+        subservers.append(SubserverConfig(
+            name=server.id,
+            url=f"http://localhost:{server.port}",
+            size=0,
+            family=server.family,
+            parameter_size=server.size,
+            context_length=server.context_window or 4096,
+        ))
 
-    return AppConfig(
-        subservers=subservers,
-    )
+    # Remote (distant) servers are passed through as-is.
+    for server in unified.remote_servers:
+        subservers.append(SubserverConfig(
+            name=server.name,
+            url=server.url,
+            size=0,
+            family=server.family,
+            parameter_size=server.size,
+            context_length=server.context_length,
+        ))
+
+    return AppConfig(subservers=subservers)
