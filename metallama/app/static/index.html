@@ -137,6 +137,27 @@
       </div>
     </div>
 
+    <!-- Login Modal -->
+    <div id="login-modal" class="modal-overlay is-hidden">
+      <div class="modal-dialog" style="max-width: 360px;">
+        <div class="modal-header">
+          <h2>Admin Login</h2>
+          <button class="modal-close" data-action="login-close" title="Close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="login-password">Password</label>
+            <input type="password" id="login-password" autocomplete="off" />
+          </div>
+          <p id="login-error" class="login-error is-hidden"></p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" data-action="login-cancel">Cancel</button>
+          <button class="btn-primary" data-action="login-submit">Login</button>
+        </div>
+      </div>
+    </div>
+
     <footer class="app-footer">
       <div class="footer-content">
         <div class="vram-container">

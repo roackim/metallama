@@ -693,11 +693,33 @@ button:disabled {
   border: 1px solid var(--line);
   width: 100%;
   max-width: 720px;
-  height: 90vh;
-  max-height: 90vh;
   display: flex;
   flex-direction: column;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+#edit-modal .modal-dialog {
+  height: 90vh;
+  max-height: 90vh;
+}
+#login-modal .modal-dialog {
+  max-width: 360px;
+}
+#login-modal .modal-body {
+  padding: 1.25rem 1.5rem;
+}
+#login-modal #login-password {
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 1rem;
+  font-family: inherit;
+  outline: none;
+}
+#login-modal #login-password:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
 }
 .modal-header {
   flex-shrink: 0;
@@ -1266,4 +1288,12 @@ body.is-admin .admin-only {
 .admin-toggle.active:hover {
   opacity: 0.9;
   color: #fff;
+}
+
+.login-error {
+  color: var(--red);
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin: 0;
+  padding: 0;
 }

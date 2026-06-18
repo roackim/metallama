@@ -58,15 +58,58 @@ async function init() {
       if (isAdmin()) {
         await logout();
       } else {
-        const pw = prompt("Admin password:");
-        if (pw !== null) {
-          try {
-            await login(pw);
-          } catch (err) {
-            setConfigMessage(err.message, true);
-          }
-        }
+        openLoginModal();
       }
+    });
+  }
+
+  // ── Login modal wiring ────────────────────────────────
+  const loginModal = document.getElementById("login-modal");
+  const loginPw = document.getElementById("login-password");
+  const loginErr = document.getElementById("login-error");
+
+  function openLoginModal() {
+    loginErr.classList.add("is-hidden");
+    loginErr.textContent = "";
+    if (loginPw) { loginPw.value = ""; }
+    loginModal?.classList.remove("is-hidden");
+    setTimeout(() => loginPw?.focus(), 50);
+  }
+
+  function closeLoginModal() {
+    loginModal?.classList.add("is-hidden");
+    if (loginPw) loginPw.value = "";
+  }
+
+  async function submitLogin() {
+    const pw = loginPw?.value || "";
+    if (!pw) return;
+    try {
+      await login(pw);
+      closeLoginModal();
+    } catch (err) {
+      loginErr.textContent = err.message || "Login failed";
+      loginErr.classList.remove("is-hidden");
+    }
+  }
+
+  if (loginModal) {
+    loginModal.addEventListener("click", async (e) => {
+      if (!(e.target instanceof HTMLButtonElement)) {
+        // Click on overlay closes
+        if (e.target === loginModal) closeLoginModal();
+        return;
+      }
+      const action = e.target.dataset.action;
+      if (action === "login-close" || action === "login-cancel") closeLoginModal();
+      else if (action === "login-submit") await submitLogin();
+    });
+  }
+
+  if (loginPw) {
+    loginPw.addEventListener("keydown", async (e) => {
+      if (e.key === "Enter") { e.preventDefault(); await submitLogin(); }
+      if (e.key === "Escape") closeLoginModal();
     });
   }
 
