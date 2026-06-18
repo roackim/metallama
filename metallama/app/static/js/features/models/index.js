@@ -342,6 +342,12 @@ function setCardError(modelId, message = "") {
   cardErrors.set(modelId, normalized);
 }
 
+function escapeHtml(s) {
+  const d = document.createElement("div");
+  d.textContent = s;
+  return d.innerHTML;
+}
+
 function canStart(model) {
   return model.status === "offline" && !inFlight.has(model.id);
 }
@@ -360,6 +366,12 @@ function cardAccentColor(managed) {
   return managed ? "#3B95DD" : "#8B5CF6";
 }
 
+function modelStem(model) {
+  if (!model.model_path) return "";
+  const fname = model.model_path.replace(/^.*[\\/]/, "");
+  return fname.replace(/\.gguf$/i, "");
+}
+
 function cardTemplate(model) {
   const isManaged = model.managed !== false;
   const action = model.status === "online" ? "stop" : "start";
@@ -372,6 +384,7 @@ function cardTemplate(model) {
   const isLoading = inFlight.has(model.id);
   const overlayClass = isLoading ? "panel-overlay card-overlay" : "panel-overlay card-overlay is-hidden";
   const statusText = action === "start" ? "Starting..." : "Stopping...";
+  const stem = modelStem(model);
 
   const isLLM = type === "LLM";
   const ctxValue = model.context_window || "";
@@ -394,6 +407,7 @@ function cardTemplate(model) {
       <div class="card-header-row">
         <div class="title-wrap">
           <h3>${model.display_name}</h3>
+          ${stem ? `<span class="card-model-stem">${escapeHtml(stem)}</span>` : ""}
         </div>
         <div class="status-badge ${model.status}">${model.status}</div>
       </div>
@@ -616,6 +630,19 @@ export function setupModels() {
       document.getElementById("modal-title").textContent = isManaged ? "Add Local Server" : "Add Remote Server";
       if (isManaged) {
         loadModelFiles().then((mdata) => populateModelSelector(mdata.files || [], ""));
+      }
+    });
+  }
+
+  // ── Stem button in edit modal ─────────────────────────
+  const stemBtn = document.getElementById("edit-stem-btn");
+  if (stemBtn) {
+    stemBtn.addEventListener("click", () => {
+      const select = document.getElementById("edit-model-path");
+      const currentVal = select?.value || "";
+      if (currentVal) {
+        const fname = currentVal.replace(/^.*[\\/]/, "").replace(/\.gguf$/i, "");
+        document.getElementById("edit-name").value = fname;
       }
     });
   }

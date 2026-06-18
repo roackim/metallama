@@ -1297,3 +1297,26 @@ body.is-admin .admin-only {
   margin: 0;
   padding: 0;
 }
+
+.card-model-stem {
+  display: block;
+  font-family: ui-monospace, monospace;
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-top: 0.15rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 320px;
+}
+
+.input-with-btn {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.input-with-btn input {
+  flex: 1;
+  min-width: 0;
+}
