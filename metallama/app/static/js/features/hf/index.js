@@ -142,7 +142,7 @@ function renderFile(file, repoId) {
         <span class="hf-file-size">${size}</span>
       </div>
       <div class="hf-file-actions">
-        <button class="btn-primary btn-small hf-download-btn" data-repo-id="${escapeHtml(repoId)}">↓ Download</button>
+        <button class="btn-primary btn-small hf-download-btn admin-only" data-repo-id="${escapeHtml(repoId)}">↓ Download</button>
       </div>
     </div>
   `;

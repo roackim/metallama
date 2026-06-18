@@ -408,15 +408,15 @@ function cardTemplate(model) {
           <div class="info-row">
             ${isManaged && model.pid !== undefined ? `<span class="info-item">PID: ${model.pid ?? "-"}</span>` : ""}
             ${ctxDisplay}
-            ${isManaged ? `<button class="btn-secondary btn-small" data-id="${model.id}" data-action="cmd" title="Copy launch command">CMD</button>` : ""}
-            <button class="btn-secondary btn-small" data-id="${model.id}" data-managed="${isManaged}" data-action="edit" title="Edit server config">Edit</button>
+            ${isManaged ? `<button class="btn-secondary btn-small admin-only" data-id="${model.id}" data-action="cmd" title="Copy launch command">CMD</button>` : ""}
+            <button class="btn-secondary btn-small admin-only" data-id="${model.id}" data-managed="${isManaged}" data-action="edit" title="Edit server config">Edit</button>
           </div>
         </div>
 
         <p class="description">${model.description || ""}</p>
 
         <div class="card-actions-col">
-          ${isManaged ? `<button class="btn-action-${action}" data-id="${model.id}" data-action="${action}" ${canRunAction ? "" : "disabled"}>${label}</button>` : ""}
+          ${isManaged ? `<button class="btn-action-${action} admin-only" data-id="${model.id}" data-action="${action}" ${canRunAction ? "" : "disabled"}>${label}</button>` : ""}
         </div>
       </div>
 

@@ -1216,3 +1216,54 @@ button:disabled {
 .hf-file-actions {
   flex-shrink: 0;
 }
+
+/* ── Admin mode ──────────────────────────────────────────── */
+
+/* Hidden by default (auth enabled, not logged in) */
+body.admin-locked .admin-only {
+  display: none !important;
+}
+
+/* Always visible when admin (or auth disabled) */
+body.is-admin .admin-only {
+  display: inline-flex;
+}
+
+/* ── Header controls ─────────────────────────────────────── */
+
+.header-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.admin-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.65rem;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: inherit;
+}
+
+.admin-toggle:hover {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+
+.admin-toggle.active {
+  background: var(--blue);
+  color: #fff;
+  border-color: var(--blue);
+}
+
+.admin-toggle.active:hover {
+  opacity: 0.9;
+  color: #fff;
+}

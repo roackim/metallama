@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
+from .auth import admin_guard
 from .hf import download_model, list_gguf_files, search_models
 
 router = APIRouter(prefix="/api/hf", tags=["huggingface"])
@@ -29,7 +30,7 @@ async def files_endpoint(namespace: str, repo: str) -> dict[str, Any]:
 
 
 @router.post("/download")
-async def download_endpoint(payload: dict[str, Any] = Body(...)) -> StreamingResponse:
+async def download_endpoint(payload: dict[str, Any] = Body(...), _guard: None = Depends(admin_guard)) -> StreamingResponse:
     repo_id = payload.get("repo_id", "")
     filenames = payload.get("filenames", [])
     if not repo_id or not filenames:

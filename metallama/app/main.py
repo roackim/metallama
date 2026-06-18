@@ -8,10 +8,11 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 
-from fastapi import Body, FastAPI, HTTPException
+from fastapi import Body, Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from .auth import admin_guard, auth_enabled, check_password, create_session, revoke_session
 from .config import STATIC_DIR, Config
 from .hf_routes import router as hf_router
 from .models import ProcessState
@@ -77,7 +78,38 @@ def health_check() -> dict[str, Any]:
     """Return health status including binary availability."""
     return {
         "binaries": binary_health(),
+        "auth_enabled": auth_enabled(),
     }
+
+
+# ---------------------------------------------------------------------------
+# Auth routes
+# ---------------------------------------------------------------------------
+
+@app.post("/api/auth/login")
+def auth_login(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    if not auth_enabled():
+        return {"ok": True, "token": "", "auth_enabled": False}
+    password = payload.get("password", "")
+    if not password:
+        raise HTTPException(status_code=400, detail="Password required")
+    if not check_password(password):
+        raise HTTPException(status_code=401, detail="Invalid password")
+    token, expires = create_session()
+    return {"ok": True, "token": token, "expires": expires, "auth_enabled": True}
+
+
+@app.post("/api/auth/logout")
+def auth_logout(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    token = payload.get("token", "")
+    if token:
+        revoke_session(token)
+    return {"ok": True}
+
+
+@app.get("/api/auth/status")
+def auth_status() -> dict[str, Any]:
+    return {"auth_enabled": auth_enabled()}
 
 
 @app.get("/api/system/vram")
@@ -264,7 +296,7 @@ def server_status(server_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/models/{model_name}/start")
-async def start_model(model_name: str) -> dict[str, Any]:
+async def start_model(model_name: str, _guard: None = Depends(admin_guard)) -> dict[str, Any]:
     profile = MODEL_PROFILES.get(model_name)
     if not profile:
         raise HTTPException(status_code=404, detail="Unknown model")
@@ -297,7 +329,7 @@ async def start_model(model_name: str) -> dict[str, Any]:
 
 
 @app.post("/api/llm/servers/{server_id}/start")
-async def start_llm_server(server_id: str) -> dict[str, Any]:
+async def start_llm_server(server_id: str, _guard: None = Depends(admin_guard)) -> dict[str, Any]:
     profile = server_profiles().get(server_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Unknown server id")
@@ -306,7 +338,7 @@ async def start_llm_server(server_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/servers/{server_id}/start")
-async def start_server(server_id: str) -> dict[str, Any]:
+async def start_server(server_id: str, _guard: None = Depends(admin_guard)) -> dict[str, Any]:
     profile = server_profiles().get(server_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Unknown server id")
@@ -315,7 +347,7 @@ async def start_server(server_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/models/{model_name}/stop")
-async def stop_model(model_name: str) -> dict[str, Any]:
+async def stop_model(model_name: str, _guard: None = Depends(admin_guard)) -> dict[str, Any]:
     profile = MODEL_PROFILES.get(model_name)
     if not profile:
         raise HTTPException(status_code=404, detail="Unknown model")
@@ -342,7 +374,7 @@ async def stop_model(model_name: str) -> dict[str, Any]:
 
 
 @app.post("/api/llm/servers/{server_id}/stop")
-async def stop_llm_server(server_id: str) -> dict[str, Any]:
+async def stop_llm_server(server_id: str, _guard: None = Depends(admin_guard)) -> dict[str, Any]:
     profile = server_profiles().get(server_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Unknown server id")
@@ -351,7 +383,7 @@ async def stop_llm_server(server_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/servers/{server_id}/stop")
-async def stop_server(server_id: str) -> dict[str, Any]:
+async def stop_server(server_id: str, _guard: None = Depends(admin_guard)) -> dict[str, Any]:
     profile = server_profiles().get(server_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Unknown server id")
@@ -360,7 +392,7 @@ async def stop_server(server_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/models/create")
-async def create_model(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+async def create_model(payload: dict[str, Any] = Body(...), _guard: None = Depends(admin_guard)) -> dict[str, Any]:
     from .profiles import reload_model_profiles
     from .unified_config import add_managed_server
 
@@ -388,7 +420,7 @@ async def create_model(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
 
 
 @app.delete("/api/models/{model_name}")
-async def delete_model(model_name: str) -> dict[str, Any]:
+async def delete_model(model_name: str, _guard: None = Depends(admin_guard)) -> dict[str, Any]:
     from .profiles import reload_model_profiles
     from .unified_config import delete_managed_server, delete_remote_server, load_unified_config
 
@@ -450,7 +482,7 @@ def model_command_preview(model_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/models/{model_name}/config")
-async def update_model_config(model_name: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+async def update_model_config(model_name: str, payload: dict[str, Any] = Body(...), _guard: None = Depends(admin_guard)) -> dict[str, Any]:
     from .profiles import reload_model_profiles
     from .unified_config import update_managed_server, load_unified_config
 
@@ -530,7 +562,7 @@ async def update_model_config(model_name: str, payload: dict[str, Any] = Body(..
 
 
 @app.post("/api/remote-servers/{server_name}/config")
-async def update_remote_server_config(server_name: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+async def update_remote_server_config(server_name: str, payload: dict[str, Any] = Body(...), _guard: None = Depends(admin_guard)) -> dict[str, Any]:
     from .unified_config import update_remote_server, load_unified_config
 
     cfg = load_unified_config()

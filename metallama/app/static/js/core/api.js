@@ -1,6 +1,12 @@
+import { authHeader } from "./auth.js";
+
 export async function api(path, options = {}) {
+  const headers = { "Content-Type": "application/json" };
+  const auth = authHeader();
+  if (auth) headers["Authorization"] = auth;
+
   const response = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
+    headers,
     ...options,
   });
 
