@@ -150,6 +150,7 @@ function openEditModal(modelId, isManaged) {
       loadModelFiles().then((mdata) => populateModelSelector(mdata.files || [], data.model_path || ""));
     }
     document.getElementById("edit-modal").classList.remove("is-hidden");
+    document.getElementById("modal-delete-btn").classList.remove("is-hidden");
   });
 }
 
@@ -169,14 +170,39 @@ function openCreateModal(type) {
   document.getElementById("modal-title").textContent = isManaged ? "Add Local Server" : "Add Remote Server";
   if (isManaged) {
     loadModelFiles().then((mdata) => populateModelSelector(mdata.files || [], ""));
+    // Pre-fill defaults: port = max + 1, CTX = 32K, PAR = 2
+    api("/api/models").then((data) => {
+      const models = data.models || [];
+      const maxPort = models.reduce((max, m) => {
+        if (m.managed && m.port && m.port > max) return m.port;
+        return max;
+      }, 0);
+      document.getElementById("edit-port").value = maxPort > 0 ? maxPort + 1 : 8080;
+      document.getElementById("edit-context-window").value = 32000;
+      document.getElementById("edit-parallel").value = 2;
+    });
   }
   document.getElementById("edit-modal").classList.remove("is-hidden");
+  document.getElementById("modal-delete-btn").classList.add("is-hidden");
 }
 
 function closeEditModal() {
   document.getElementById("edit-modal").classList.add("is-hidden");
   editingModelId = null;
   modalMode = "edit";
+}
+
+async function deleteModal() {
+  if (!editingModelId) return;
+  const name = editingModelId;
+  try {
+    await api(`/api/models/${encodeURIComponent(name)}`, { method: "DELETE" });
+    setConfigMessage(`Server "${name}" deleted`);
+    closeEditModal();
+    await refreshModels();
+  } catch (err) {
+    setConfigMessage(err.message, true);
+  }
 }
 
 async function saveEditModal() {
@@ -551,6 +577,8 @@ export function setupModels() {
         closeEditModal();
       } else if (action === "modal-save") {
         saveEditModal();
+      } else if (action === "modal-delete") {
+        deleteModal();
       }
     });
 

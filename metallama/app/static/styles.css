@@ -831,6 +831,19 @@ button:disabled {
   cursor: pointer;
   font-size: 0.88rem;
 }
+.modal-footer .btn-danger {
+  background: transparent;
+  color: var(--red);
+  border: 1px solid var(--red);
+  padding: 0.5rem 1.25rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 0.88rem;
+}
+.modal-footer .btn-danger:hover {
+  background: var(--red);
+  color: #fff;
+}
 
 .ui-message {
   height: 1.5rem;

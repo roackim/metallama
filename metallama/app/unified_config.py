@@ -159,6 +159,26 @@ def update_remote_server(server_id: str, updates: dict[str, Any], path: str | Pa
     raise ValueError(f"Remote server '{server_id}' not found in config")
 
 
+def delete_managed_server(server_id: str, path: str | Path = "config.yaml") -> None:
+    """Remove a managed_server entry from config.yaml."""
+    config = load_unified_config(path)
+    before = len(config.managed_servers)
+    config.managed_servers = [s for s in config.managed_servers if s.name != server_id]
+    if len(config.managed_servers) == before:
+        raise ValueError(f"Managed server '{server_id}' not found in config")
+    save_unified_config(config, path)
+
+
+def delete_remote_server(server_id: str, path: str | Path = "config.yaml") -> None:
+    """Remove a remote_server entry from config.yaml."""
+    config = load_unified_config(path)
+    before = len(config.remote_servers)
+    config.remote_servers = [s for s in config.remote_servers if s.name != server_id]
+    if len(config.remote_servers) == before:
+        raise ValueError(f"Remote server '{server_id}' not found in config")
+    save_unified_config(config, path)
+
+
 def add_managed_server(data: dict[str, Any], path: str | Path = "config.yaml") -> ManagedServer:
     """Add a new managed_server entry to config.yaml."""
     config = load_unified_config(path)

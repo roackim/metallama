@@ -387,6 +387,31 @@ async def create_model(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="type must be 'managed' or 'remote'")
 
 
+@app.delete("/api/models/{model_name}")
+async def delete_model(model_name: str) -> dict[str, Any]:
+    from .profiles import reload_model_profiles
+    from .unified_config import delete_managed_server, delete_remote_server, load_unified_config
+
+    # Try managed first
+    if MODEL_PROFILES.get(model_name):
+        async with model_locks[model_name]:
+            cleanup_dead(model_name)
+            state = runtime_processes.get(model_name)
+            if state and is_alive(state.process):
+                raise HTTPException(status_code=409, detail="Stop the server before deleting")
+        delete_managed_server(model_name)
+        reload_model_profiles()
+        return {"ok": True, "deleted": model_name}
+
+    # Try remote
+    cfg = load_unified_config()
+    if any(s.name == model_name for s in cfg.remote_servers):
+        delete_remote_server(model_name)
+        return {"ok": True, "deleted": model_name}
+
+    raise HTTPException(status_code=404, detail="Unknown model")
+
+
 @app.get("/api/models/{model_name}/status")
 def model_status(model_name: str) -> dict[str, Any]:
     profile = MODEL_PROFILES.get(model_name)
