@@ -159,6 +159,28 @@ def update_remote_server(server_id: str, updates: dict[str, Any], path: str | Pa
     raise ValueError(f"Remote server '{server_id}' not found in config")
 
 
+def add_managed_server(data: dict[str, Any], path: str | Path = "config.yaml") -> ManagedServer:
+    """Add a new managed_server entry to config.yaml."""
+    config = load_unified_config(path)
+    if any(s.name == data.get("name") for s in config.managed_servers):
+        raise ValueError(f"Managed server '{data.get('name')}' already exists")
+    server = ManagedServer(**data)
+    config.managed_servers.append(server)
+    save_unified_config(config, path)
+    return server
+
+
+def add_remote_server(data: dict[str, Any], path: str | Path = "config.yaml") -> RemoteServer:
+    """Add a new remote_server entry to config.yaml."""
+    config = load_unified_config(path)
+    if any(s.name == data.get("name") for s in config.remote_servers):
+        raise ValueError(f"Remote server '{data.get('name')}' already exists")
+    server = RemoteServer(**data)
+    config.remote_servers.append(server)
+    save_unified_config(config, path)
+    return server
+
+
 def _yaml_str_value(value: Any) -> str:
     """Format a single value as a YAML scalar (quote strings that need it)."""
     if value is None:

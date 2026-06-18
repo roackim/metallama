@@ -11,6 +11,7 @@ const cardErrors = new Map();
 // ── Edit Modal State ──────────────────────────────────────
 let editingModelId = null;
 let editingIsManaged = true;
+let modalMode = "edit"; // "edit" or "create"
 let modelFilesCache = null;
 let modelsDirCache = "";
 
@@ -102,7 +103,26 @@ function setManagedOnlyVisible(visible) {
   });
 }
 
+function setCreateOnlyVisible(visible) {
+  document.querySelectorAll(".create-only").forEach((el) => {
+    el.classList.toggle("is-hidden", !visible);
+  });
+}
+
+function clearModalFields() {
+  document.getElementById("edit-name").value = "";
+  document.getElementById("edit-url").value = "";
+  document.getElementById("edit-model-path").innerHTML = "";
+  document.getElementById("edit-port").value = "";
+  document.getElementById("edit-context-window").value = "";
+  document.getElementById("edit-parallel").value = "";
+  document.getElementById("edit-extra-args").value = "";
+  const warning = document.getElementById("edit-model-warning");
+  if (warning) warning.classList.add("is-hidden");
+}
+
 function openEditModal(modelId, isManaged) {
+  modalMode = "edit";
   const model = (async () => {
     if (isManaged) {
       return await api(`/api/models/${modelId}/status`);
@@ -115,6 +135,7 @@ function openEditModal(modelId, isManaged) {
   model.then((data) => {
     editingModelId = modelId;
     editingIsManaged = isManaged;
+    setCreateOnlyVisible(false);
     setManagedOnlyVisible(isManaged);
     document.getElementById("modal-title").textContent = `Edit: ${data.display_name || data.id}`;
     document.getElementById("edit-name").value = data.display_name || data.id || "";
@@ -132,12 +153,36 @@ function openEditModal(modelId, isManaged) {
   });
 }
 
+function openCreateModal(type) {
+  modalMode = "create";
+  editingModelId = null;
+  const isManaged = type === "managed";
+  editingIsManaged = isManaged;
+  clearModalFields();
+  setCreateOnlyVisible(true);
+  setManagedOnlyVisible(isManaged);
+
+  // Type selector default
+  const typeSelect = document.getElementById("edit-server-type");
+  if (typeSelect) typeSelect.value = type;
+
+  document.getElementById("modal-title").textContent = isManaged ? "Add Local Server" : "Add Remote Server";
+  if (isManaged) {
+    loadModelFiles().then((mdata) => populateModelSelector(mdata.files || [], ""));
+  }
+  document.getElementById("edit-modal").classList.remove("is-hidden");
+}
+
 function closeEditModal() {
   document.getElementById("edit-modal").classList.add("is-hidden");
   editingModelId = null;
+  modalMode = "edit";
 }
 
 async function saveEditModal() {
+  if (modalMode === "create") {
+    return saveCreateModal();
+  }
   if (!editingModelId) return;
 
   const newName = document.getElementById("edit-name").value.trim();
@@ -190,6 +235,70 @@ async function saveEditModal() {
       await refreshModels();
     } catch (err) {
       setCardError(editingModelId, err.message);
+      setConfigMessage(err.message, true);
+    }
+  }
+}
+
+async function saveCreateModal() {
+  const type = document.getElementById("edit-server-type")?.value || "managed";
+  const newName = document.getElementById("edit-name").value.trim();
+
+  if (!newName) {
+    setConfigMessage("Name is required", true);
+    return;
+  }
+
+  if (type === "managed") {
+    const payload = {
+      type: "managed",
+      name: newName,
+      model_path: document.getElementById("edit-model-path").value.trim(),
+      port: parseInt(document.getElementById("edit-port").value, 10),
+      context_window: parseInt(document.getElementById("edit-context-window").value, 10) || 4096,
+      parallel: parseInt(document.getElementById("edit-parallel").value, 10) || 1,
+      extra_args: document.getElementById("edit-extra-args").value
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    };
+    if (!payload.model_path) {
+      setConfigMessage("Model path is required", true);
+      return;
+    }
+    if (isNaN(payload.port)) {
+      setConfigMessage("Port is required", true);
+      return;
+    }
+    if (!isNaN(payload.context_window) === false) delete payload.context_window;
+    if (!isNaN(payload.parallel) === false) delete payload.parallel;
+
+    try {
+      await api("/api/models/create", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      setConfigMessage(`Server "${newName}" created`);
+      closeEditModal();
+      await refreshModels();
+    } catch (err) {
+      setConfigMessage(err.message, true);
+    }
+  } else {
+    const newUrl = document.getElementById("edit-url").value.trim();
+    if (!newUrl) {
+      setConfigMessage("URL is required for remote servers", true);
+      return;
+    }
+    try {
+      await api("/api/models/create", {
+        method: "POST",
+        body: JSON.stringify({ type: "remote", name: newName, url: newUrl }),
+      });
+      setConfigMessage(`Remote server "${newName}" created`);
+      closeEditModal();
+      await refreshModels();
+    } catch (err) {
       setConfigMessage(err.message, true);
     }
   }
@@ -456,6 +565,29 @@ export function setupModels() {
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && !modal.classList.contains("is-hidden")) {
         closeEditModal();
+      }
+    });
+  }
+
+  // ── Add Server button ─────────────────────────────────
+  const addBtn = document.getElementById("add-model-btn");
+  if (addBtn) {
+    addBtn.addEventListener("click", () => {
+      openCreateModal("managed");
+    });
+  }
+
+  // ── Type selector in create mode ──────────────────────
+  const typeSelect = document.getElementById("edit-server-type");
+  if (typeSelect) {
+    typeSelect.addEventListener("change", () => {
+      if (modalMode !== "create") return;
+      const isManaged = typeSelect.value === "managed";
+      editingIsManaged = isManaged;
+      setManagedOnlyVisible(isManaged);
+      document.getElementById("modal-title").textContent = isManaged ? "Add Local Server" : "Add Remote Server";
+      if (isManaged) {
+        loadModelFiles().then((mdata) => populateModelSelector(mdata.files || [], ""));
       }
     });
   }

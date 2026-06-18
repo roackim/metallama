@@ -359,6 +359,34 @@ async def stop_server(server_id: str) -> dict[str, Any]:
     return {"ok": result["ok"], "server": result["model"]}
 
 
+@app.post("/api/models/create")
+async def create_model(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    from .profiles import reload_model_profiles
+    from .unified_config import add_managed_server
+
+    model_type = payload.pop("type", "managed")
+    if model_type == "managed":
+        if not payload.get("name"):
+            raise HTTPException(status_code=400, detail="name is required")
+        if not payload.get("port"):
+            raise HTTPException(status_code=400, detail="port is required")
+        if not payload.get("model_path"):
+            raise HTTPException(status_code=400, detail="model_path is required")
+        server = add_managed_server(payload)
+        reload_model_profiles()
+        return {"ok": True, "name": server.name}
+    elif model_type == "remote":
+        if not payload.get("name"):
+            raise HTTPException(status_code=400, detail="name is required")
+        if not payload.get("url"):
+            raise HTTPException(status_code=400, detail="url is required")
+        from .unified_config import add_remote_server
+        add_remote_server(payload)
+        return {"ok": True, "name": payload["name"]}
+    else:
+        raise HTTPException(status_code=400, detail="type must be 'managed' or 'remote'")
+
+
 @app.get("/api/models/{model_name}/status")
 def model_status(model_name: str) -> dict[str, Any]:
     profile = MODEL_PROFILES.get(model_name)

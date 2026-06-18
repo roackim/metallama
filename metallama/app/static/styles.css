@@ -931,6 +931,14 @@ button:disabled {
   letter-spacing: 0.02em;
 }
 
+/* ── Models header ────────────────────────────────────────── */
+
+.models-header {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.5rem;
+}
+
 /* ── Section separator ────────────────────────────────────── */
 
 .section-separator {

@@ -54,10 +54,13 @@
             <svg class="hf-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             <input type="text" id="hf-search" placeholder="Search Hugging Face for GGUF models…" autocomplete="off" spellcheck="false" />
           </div>
-          <div id="hf-results" class="hf-results is-hidden"></div>
+        <div id="hf-results" class="hf-results is-hidden"></div>
         </div>
         <hr class="section-separator" />
 
+        <div class="models-header">
+          <button id="add-model-btn" class="btn-secondary btn-small" title="Add a new server">+ Add Server</button>
+        </div>
         <div id="models" class="models-list"></div>
         <div class="summary-container">
           <p id="summary" class="summary"></p>
@@ -77,6 +80,13 @@
         <div class="modal-body">
           <div class="modal-columns">
             <div class="modal-column">
+              <div class="form-group create-only">
+                <label for="edit-server-type">Type</label>
+                <select id="edit-server-type">
+                  <option value="managed" selected>Local (managed)</option>
+                  <option value="remote">Remote</option>
+                </select>
+              </div>
               <div class="form-group">
                 <label for="edit-name">Name</label>
                 <input type="text" id="edit-name" />
