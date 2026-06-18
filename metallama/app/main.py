@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import STATIC_DIR, Config
+from .hf_routes import router as hf_router
 from .models import ProcessState
 from .ollama.config import load_config as load_ollama_config
 from .ollama.probe import probe_subservers
@@ -42,6 +43,7 @@ _ollama_cfg = load_ollama_config()
 init_ollama_registry(_ollama_cfg)
 app.include_router(ollama_router, prefix="/ollama")
 app.include_router(openai_router, prefix="/ollama")
+app.include_router(hf_router)
 
 # Server-side history storage (500 samples at 1s = ~8 minutes)
 MAX_HISTORY_SAMPLES = 500
@@ -500,4 +502,7 @@ async def update_remote_server_config(server_name: str, payload: dict[str, Any] 
     unified = load_unified_config()
     entry = next((s for s in unified.remote_servers if s.name == (updates.get("name") or server_name)), None)
     return {"ok": True, "config": {"name": entry.name, "url": entry.url} if entry else {}}
+
+
+
 

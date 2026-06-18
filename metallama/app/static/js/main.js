@@ -1,6 +1,7 @@
 import { api } from "./core/api.js";
 import { setConfigMessage } from "./core/uiMessage.js";
 import { setupModels, refreshModels } from "./features/models/index.js";
+import { setupHfSearch } from "./features/hf/index.js";
 import { refreshRam, refreshRamGraph, refreshVram, refreshVramGraph } from "./features/system/index.js";
 import { setupThemeSwitcher } from "./features/theme/index.js";
 
@@ -37,6 +38,7 @@ async function init() {
   });
 
   setupModels();
+  setupHfSearch();
 
   // Check binary health on startup
   try {

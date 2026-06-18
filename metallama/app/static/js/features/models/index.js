@@ -14,6 +14,9 @@ let editingIsManaged = true;
 let modelFilesCache = null;
 let modelsDirCache = "";
 
+// Expose cache invalidation for HF download module
+window.__metallamaInvalidateModelCache = () => { modelFilesCache = null; };
+
 async function loadModelFiles() {
   if (modelFilesCache) return modelFilesCache;
   try {

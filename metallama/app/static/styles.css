@@ -926,3 +926,225 @@ button:disabled {
   font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Consolas, 'DejaVu Sans Mono', monospace;
   letter-spacing: 0.02em;
 }
+
+/* ── Hugging Face Search Panel ──────────────────────────── */
+
+.hf-panel {
+  position: relative;
+  margin-bottom: 1rem;
+}
+
+/* Download progress bars — pinned above the search input */
+.hf-downloads {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.5rem;
+}
+
+.hf-dl-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.65rem;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  font-size: 0.78rem;
+  transition: opacity 0.6s ease;
+}
+
+.hf-dl-bar.fade-out {
+  opacity: 0;
+}
+
+.hf-dl-label {
+  flex-shrink: 0;
+  font-family: ui-monospace, monospace;
+  font-weight: 600;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hf-dl-track {
+  flex: 1;
+  height: 1rem;
+  background: var(--line, #e5e7eb);
+  position: relative;
+  overflow: hidden;
+}
+
+.hf-dl-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  background: var(--blue, #3B95DD);
+  transition: width 0.2s ease;
+}
+
+.hf-dl-fill.done {
+  background: var(--green, #22c55e);
+}
+
+.hf-dl-fill.error {
+  background: var(--red, #ef4444);
+}
+
+.hf-dl-text {
+  flex-shrink: 0;
+  font-family: ui-monospace, monospace;
+  font-weight: 600;
+  min-width: 80px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.hf-search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.hf-search-icon {
+  position: absolute;
+  left: 0.75rem;
+  color: var(--text-muted, #888);
+  pointer-events: none;
+  opacity: 0.6;
+}
+
+.hf-search-wrap input {
+  width: 100%;
+  padding: 0.6rem 0.75rem 0.6rem 2.4rem;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.hf-search-wrap input:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+.hf-results {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  max-height: 70vh;
+  overflow-y: auto;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-top: none;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+.hf-loading,
+.hf-empty,
+.hf-error {
+  padding: 1rem 0.75rem;
+  font-size: 0.85rem;
+  color: var(--text-muted, #888);
+}
+
+.hf-error {
+  color: var(--red, #ef4444);
+}
+
+.hf-result {
+  border-bottom: 1px solid var(--line);
+}
+
+.hf-result:last-child {
+  border-bottom: none;
+}
+
+.hf-result-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.65rem 0.75rem;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.hf-result-header:hover {
+  background: var(--bg-hover, rgba(0, 0, 0, 0.04));
+}
+
+.hf-result-name {
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.hf-result-meta {
+  display: flex;
+  gap: 0.75rem;
+  font-size: 0.75rem;
+  color: var(--text-muted, #888);
+}
+
+.hf-result-stat {
+  white-space: nowrap;
+}
+
+.hf-result-files {
+  padding: 0 0.75rem 0.5rem;
+  background: var(--bg);
+}
+
+.hf-file {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.5rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--hf-file-bg, rgba(0, 0, 0, 0.02));
+  transition: background 0.1s;
+  cursor: default;
+}
+
+.hf-file:hover {
+  background: var(--hf-file-hover, rgba(37, 99, 235, 0.08));
+}
+
+.hf-file:last-child {
+  border-bottom: none;
+}
+
+.hf-file-info {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.hf-file-name {
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hf-file-size {
+  font-size: 0.75rem;
+  color: var(--text-muted, #888);
+  white-space: nowrap;
+}
+
+.hf-file-actions {
+  flex-shrink: 0;
+}
