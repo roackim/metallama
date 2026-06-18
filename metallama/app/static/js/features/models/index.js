@@ -11,10 +11,91 @@ const cardErrors = new Map();
 // ── Edit Modal State ──────────────────────────────────────
 let editingModelId = null;
 let editingIsManaged = true;
+let modelFilesCache = null;
+let modelsDirCache = "";
+
+async function loadModelFiles() {
+  if (modelFilesCache) return modelFilesCache;
+  try {
+    const data = await api("/api/model-files");
+    modelFilesCache = data;
+    modelsDirCache = data.models_dir || "";
+    return data;
+  } catch {
+    return { files: [], models_dir: "" };
+  }
+}
+
+function populateModelSelector(files, currentPath) {
+  const select = document.getElementById("edit-model-path");
+  select.innerHTML = "";
+
+  const warning = document.getElementById("edit-model-warning");
+  const normalizedCurrent = currentPath ? currentPath.replace(/^.*[\\/]/, "") : "";
+  // Build full paths for option values
+  const dir = modelsDirCache ? modelsDirCache.replace(/\/$/, "") + "/" : "";
+
+  if (!files.length) {
+    const opt = document.createElement("option");
+    opt.value = currentPath || "";
+    opt.textContent = currentPath || "(no .gguf files found)";
+    opt.selected = true;
+    select.appendChild(opt);
+    warning.textContent = "⚠ No .gguf files found in METALLAMA_MODELS_DIR";
+    warning.classList.remove("is-hidden");
+    return;
+  }
+
+  // Check if current model is in the list
+  const found = files.some((f) => {
+    const fname = f.replace(/^.*[\\/]/, "");
+    return fname === normalizedCurrent || currentPath?.includes(fname);
+  });
+
+  if (!found && currentPath) {
+    // Prepend current (missing) model so user sees what's selected
+    const opt = document.createElement("option");
+    opt.value = currentPath;
+    opt.textContent = `${normalizedCurrent} (not found)`;
+    opt.selected = true;
+    opt.style.color = "#ef4444";
+    select.appendChild(opt);
+    warning.textContent = `⚠ Model file not found locally: ${normalizedCurrent}`;
+    warning.classList.remove("is-hidden");
+  } else {
+    warning.classList.add("is-hidden");
+  }
+
+  files.forEach((f) => {
+    const opt = document.createElement("option");
+    opt.value = dir + f;
+    opt.textContent = f;
+    if (found && currentPath?.includes(f.replace(/^.*[\\/]/, ""))) {
+      opt.selected = true;
+    }
+    select.appendChild(opt);
+  });
+
+  // Update warning when user changes selection
+  select.onchange = () => {
+    const val = select.value;
+    const isMissing = select.selectedOptions[0]?.textContent.endsWith("(not found)");
+    if (isMissing) {
+      const fname = val.replace(/^.*[\\/]/, "");
+      warning.textContent = `⚠ Model file not found locally: ${fname}`;
+      warning.classList.remove("is-hidden");
+    } else {
+      warning.classList.add("is-hidden");
+    }
+  };
+}
 
 function setManagedOnlyVisible(visible) {
   document.querySelectorAll(".managed-only").forEach((el) => {
     el.classList.toggle("is-hidden", !visible);
+  });
+  document.querySelectorAll(".remote-only").forEach((el) => {
+    el.classList.toggle("is-hidden", visible);
   });
 }
 
@@ -35,12 +116,14 @@ function openEditModal(modelId, isManaged) {
     document.getElementById("modal-title").textContent = `Edit: ${data.display_name || data.id}`;
     document.getElementById("edit-name").value = data.display_name || data.id || "";
     document.getElementById("edit-url").value = data.url || "";
-    document.getElementById("edit-url").readOnly = isManaged;
     if (isManaged) {
+      document.getElementById("edit-model-path").value = data.model_path || "";
       document.getElementById("edit-port").value = data.port || "";
       document.getElementById("edit-context-window").value = data.context_window || "";
       document.getElementById("edit-parallel").value = data.parallel || "";
       document.getElementById("edit-extra-args").value = (data.extra_args || []).join("\n");
+      // Populate model selector from available .gguf files
+      loadModelFiles().then((mdata) => populateModelSelector(mdata.files || [], data.model_path || ""));
     }
     document.getElementById("edit-modal").classList.remove("is-hidden");
   });
@@ -60,6 +143,7 @@ async function saveEditModal() {
   if (editingIsManaged) {
     const payload = {
       name: newName,
+      model_path: document.getElementById("edit-model-path").value.trim(),
       port: parseInt(document.getElementById("edit-port").value, 10),
       context_window: parseInt(document.getElementById("edit-context-window").value, 10),
       parallel: parseInt(document.getElementById("edit-parallel").value, 10),
@@ -69,7 +153,7 @@ async function saveEditModal() {
         .filter(Boolean),
     };
     Object.keys(payload).forEach((key) => {
-      if (key === "extra_args" || key === "name") return;
+      if (key === "extra_args" || key === "name" || key === "model_path") return;
       if (isNaN(payload[key])) delete payload[key];
     });
     if (payload.name === "") delete payload.name;

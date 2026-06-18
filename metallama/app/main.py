@@ -172,6 +172,19 @@ def get_ram_history() -> dict[str, Any]:
     return {"history": list(ram_history)}
 
 
+@app.get("/api/model-files")
+def list_model_files() -> dict[str, Any]:
+    """Scan METALLAMA_MODELS_DIR for .gguf files and return their paths."""
+    models_dir = Config.MODELS_DIR
+    if not models_dir or not Path(models_dir).is_dir():
+        return {"files": [], "models_dir": models_dir}
+    models_path = Path(models_dir)
+    files = sorted(
+        str(p.relative_to(models_path)) for p in models_path.rglob("*.gguf")
+    )
+    return {"files": files, "models_dir": str(models_path)}
+
+
 @app.get("/api/models")
 async def list_models() -> dict[str, Any]:
     from .unified_config import load_unified_config
@@ -405,6 +418,13 @@ async def update_model_config(model_name: str, payload: dict[str, Any] = Body(..
         if not isinstance(new_name, str) or not new_name.strip():
             raise HTTPException(status_code=400, detail="name must be a non-empty string")
         updates["name"] = new_name.strip()
+
+    # Validate and collect model_path if provided
+    if "model_path" in payload:
+        mp = payload["model_path"]
+        if not isinstance(mp, str):
+            raise HTTPException(status_code=400, detail="model_path must be a string")
+        updates["model_path"] = mp.strip()
 
     # Validate and collect context_window if provided
     if "context_window" in payload:

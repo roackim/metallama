@@ -69,9 +69,14 @@
                 <label for="edit-name">Name</label>
                 <input type="text" id="edit-name" />
               </div>
-              <div class="form-group">
+              <div class="form-group remote-only">
                 <label for="edit-url">URL</label>
                 <input type="text" id="edit-url" />
+              </div>
+              <div class="form-group managed-only">
+                <label for="edit-model-path">Model</label>
+                <select id="edit-model-path"></select>
+                <p id="edit-model-warning" class="model-not-found-warning is-hidden"></p>
               </div>
               <div class="form-group managed-only">
                 <label for="edit-port">Port</label>

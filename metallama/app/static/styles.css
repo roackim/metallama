@@ -775,6 +775,7 @@ button:disabled {
 }
 .modal-body input[type="number"],
 .modal-body input[type="text"],
+.modal-body select,
 .modal-body textarea {
   width: 100%;
   padding: 0.5rem 0.65rem;

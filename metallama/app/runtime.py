@@ -200,6 +200,7 @@ def model_payload(profile: ModelProfile) -> dict[str, Any]:
     return {
         "id": profile.name,
         "display_name": profile.name,
+        "model_path": str(profile.model_path),
         "engine": profile.engine,
         "service": "LLM",
         "family": "unknown",
