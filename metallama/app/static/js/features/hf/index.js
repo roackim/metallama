@@ -205,7 +205,10 @@ async function startDownload(repoId, filenames, btn, label) {
   try {
     const resp = await fetch("/api/hf/download", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...((sessionStorage.getItem("metallama_admin_token") && { "Authorization": `Bearer ${sessionStorage.getItem("metallama_admin_token")}` }) || {}),
+      },
       body: JSON.stringify({ repo_id: repoId, filenames }),
     });
 
