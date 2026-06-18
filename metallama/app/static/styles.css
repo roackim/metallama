@@ -19,6 +19,8 @@
   --drop:       #64748b;
   --green:      #16a34a;
   --red:        #dc2626;
+  --bg-hover:   rgba(0, 0, 0, 0.04);
+  --bg-active:  rgba(37, 99, 235, 0.06);
   
   --btn-bg:     #111111;
   --btn-text:   #ffffff;
@@ -40,6 +42,8 @@
   --drop:       #94a3b8;
   --green:      #22c55e;
   --red:        #ef4444;
+  --bg-hover:   rgba(255, 255, 255, 0.06);
+  --bg-active:  rgba(96, 165, 250, 0.12);
   
   --btn-bg:     #ffffff;
   --btn-text:   #000000;
@@ -927,6 +931,14 @@ button:disabled {
   letter-spacing: 0.02em;
 }
 
+/* ── Section separator ────────────────────────────────────── */
+
+.section-separator {
+  border: none;
+  border-top: 1px solid var(--line);
+  margin: 0.75rem 0 1.25rem;
+}
+
 /* ── Hugging Face Search Panel ──────────────────────────── */
 
 .hf-panel {
@@ -1040,22 +1052,22 @@ button:disabled {
   z-index: 100;
   max-height: 70vh;
   overflow-y: auto;
-  background: var(--bg);
+  background: var(--panel);
   border: 1px solid var(--line);
   border-top: none;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
 }
 
 .hf-loading,
 .hf-empty,
 .hf-error {
-  padding: 1rem 0.75rem;
-  font-size: 0.85rem;
-  color: var(--text-muted, #888);
+  padding: 0.75rem;
+  font-size: 0.8rem;
+  color: var(--muted);
 }
 
 .hf-error {
-  color: var(--red, #ef4444);
+  color: var(--red);
 }
 
 .hf-result {
@@ -1070,27 +1082,27 @@ button:disabled {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0.65rem 0.75rem;
+  padding: 0.5rem 0.75rem;
   cursor: pointer;
   transition: background 0.1s;
 }
 
 .hf-result-header:hover {
-  background: var(--bg-hover, rgba(0, 0, 0, 0.04));
+  background: var(--bg-hover);
 }
 
 .hf-result-name {
   font-family: ui-monospace, monospace;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   font-weight: 600;
-  color: var(--text);
+  color: var(--blue);
 }
 
 .hf-result-meta {
   display: flex;
   gap: 0.75rem;
-  font-size: 0.75rem;
-  color: var(--text-muted, #888);
+  font-size: 0.72rem;
+  color: var(--muted);
 }
 
 .hf-result-stat {
@@ -1098,24 +1110,25 @@ button:disabled {
 }
 
 .hf-result-files {
-  padding: 0 0.75rem 0.5rem;
+  padding: 0;
   background: var(--bg);
+  border-top: 1px solid var(--line);
 }
 
 .hf-file {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.45rem 0.5rem;
+  gap: 0.4rem;
+  padding: 0.3rem 0.6rem 0.3rem 1rem;
   border-bottom: 1px solid var(--line);
-  background: var(--hf-file-bg, rgba(0, 0, 0, 0.02));
+  background: var(--bg);
   transition: background 0.1s;
   cursor: default;
 }
 
 .hf-file:hover {
-  background: var(--hf-file-hover, rgba(37, 99, 235, 0.08));
+  background: var(--bg-active);
 }
 
 .hf-file:last-child {
@@ -1126,13 +1139,13 @@ button:disabled {
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.5rem;
   min-width: 0;
 }
 
 .hf-file-name {
   font-family: ui-monospace, monospace;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
@@ -1140,10 +1153,44 @@ button:disabled {
 }
 
 .hf-file-size {
-  font-size: 0.75rem;
-  color: var(--text-muted, #888);
+  font-size: 0.7rem;
+  color: var(--muted);
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+/* ── Quant badges ────────────────────────────────────────── */
+
+.hf-quant-badge {
+  display: inline-block;
+  padding: 0.05rem 0.35rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.65rem;
+  font-weight: 700;
+  border-radius: 3px;
+  letter-spacing: 0.02em;
   white-space: nowrap;
 }
+
+.hf-quant-low     { background: rgba(239, 68, 68, 0.12);  color: #ef4444; }
+.hf-quant-mid     { background: rgba(234, 179, 8, 0.12);  color: #ca8a04; }
+.hf-quant-high    { background: rgba(34, 197, 94, 0.12);  color: #16a34a; }
+.hf-quant-max     { background: rgba(37, 99, 235, 0.12);  color: #2563eb; }
+.hf-quant-fp      { background: rgba(124, 58, 237, 0.12); color: #7c3aed; }
+.hf-quant-iq      { background: rgba(249, 115, 22, 0.12); color: #ea580c; }
+.hf-quant-unknown { background: rgba(100, 116, 139, 0.12); color: #64748b; }
+
+:root[data-theme="dark"] .hf-quant-low     { color: #f87171; }
+:root[data-theme="dark"] .hf-quant-mid     { color: #facc15; }
+:root[data-theme="dark"] .hf-quant-high    { color: #4ade80; }
+:root[data-theme="dark"] .hf-quant-max     { color: #60a5fa; }
+:root[data-theme="dark"] .hf-quant-fp      { color: #a78bfa; }
+:root[data-theme="dark"] .hf-quant-iq      { color: #fb923c; }
+
+/* ── Stat accents ────────────────────────────────────────── */
+
+.hf-stat-downloads { color: var(--blue); }
+.hf-stat-likes     { color: var(--red); }
 
 .hf-file-actions {
   flex-shrink: 0;

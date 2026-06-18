@@ -36,6 +36,8 @@ export function setupHfSearch() {
   document.addEventListener("click", (e) => {
     const panel = document.getElementById(PANEL_ID);
     if (panel && !panel.contains(e.target)) {
+      const inp = document.getElementById(SEARCH_ID);
+      if (inp) inp.value = "";
       hideResults();
     }
   });
@@ -70,8 +72,8 @@ function renderSearchResult(item) {
       <div class="hf-result-header">
         <span class="hf-result-name">${escapeHtml(item.id)}</span>
         <span class="hf-result-meta">
-          <span class="hf-result-stat">↓ ${downloads}</span>
-          <span class="hf-result-stat">♥ ${likes}</span>
+          <span class="hf-result-stat hf-stat-downloads">↓ ${downloads}</span>
+          <span class="hf-result-stat hf-stat-likes">♥ ${likes}</span>
         </span>
       </div>
       <div class="hf-result-files is-hidden"></div>
@@ -119,9 +121,10 @@ async function loadFiles(repoId, container) {
 
 function renderFile(file, repoId) {
   const isSharded = file.type === "sharded";
-  const label = isSharded
-    ? `${file.base_name} (${file.shard_count} shards) — ${file.quant || "?"}`
-    : `${file.filename} — ${file.quant || "?"}`;
+  const quant = file.quant || "?";
+  const name = isSharded
+    ? `${file.base_name} (${file.shard_count} shards)`
+    : file.filename;
   const size = file.size_human;
   const downloadId = `${repoId}/${isSharded ? file.base_name : file.filename}`;
 
@@ -129,14 +132,17 @@ function renderFile(file, repoId) {
     ? file.shards.map((s) => s.path)
     : [file.path];
 
+  const quantClass = quantColor(quant);
+
   return `
     <div class="hf-file" data-download-id="${escapeHtml(downloadId)}" data-filenames='${JSON.stringify(filenames)}'>
       <div class="hf-file-info">
-        <span class="hf-file-name">${escapeHtml(label)}</span>
+        <span class="hf-file-name">${escapeHtml(name)}</span>
+        <span class="hf-quant-badge ${quantClass}">${escapeHtml(quant)}</span>
         <span class="hf-file-size">${size}</span>
       </div>
       <div class="hf-file-actions">
-        <button class="btn-secondary btn-small hf-download-btn" data-repo-id="${escapeHtml(repoId)}">Download</button>
+        <button class="btn-primary btn-small hf-download-btn" data-repo-id="${escapeHtml(repoId)}">↓ Download</button>
       </div>
     </div>
   `;
@@ -303,6 +309,17 @@ function formatBytes(n) {
   if (n >= 1 << 20) return (n / (1 << 20)).toFixed(1) + " MB";
   if (n >= 1 << 10) return (n / (1 << 10)).toFixed(1) + " KB";
   return n + " B";
+}
+
+function quantColor(quant) {
+  const q = quant.toUpperCase();
+  if (q.startsWith("Q2") || q.startsWith("Q3")) return "hf-quant-low";
+  if (q.startsWith("Q4")) return "hf-quant-mid";
+  if (q.startsWith("Q5") || q.startsWith("Q6")) return "hf-quant-high";
+  if (q.startsWith("Q8")) return "hf-quant-max";
+  if (q.startsWith("F16") || q.startsWith("BF16") || q.startsWith("F32")) return "hf-quant-fp";
+  if (q.startsWith("IQ")) return "hf-quant-iq";
+  return "hf-quant-unknown";
 }
 
 function escapeHtml(s) {
