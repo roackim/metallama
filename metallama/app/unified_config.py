@@ -178,6 +178,13 @@ def add_remote_server(data: dict[str, Any], path: str | Path = "config.yaml") ->
     return server
 
 
+def update_engine_defaults(engine: str, args: list[str], path: str | Path = "config.yaml") -> None:
+    """Replace the default CLI args for an engine in config.yaml."""
+    config = load_unified_config(path)
+    config.engine_defaults[engine] = args
+    save_unified_config(config, path)
+
+
 def _yaml_str_value(value: Any) -> str:
     """Format a single value as a YAML scalar (quote strings that need it)."""
     if value is None:

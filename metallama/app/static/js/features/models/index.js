@@ -649,4 +649,55 @@ export function setupModels() {
       }
     });
   }
+
+  // ── Defaults modal ───────────────────────────────────
+  const defaultsModal = document.getElementById("defaults-modal");
+  const defaultsBtn = document.getElementById("defaults-btn");
+  const defaultsArgs = document.getElementById("defaults-args");
+
+  async function openDefaultsModal() {
+    try {
+      const data = await api("/api/engine-defaults");
+      const args = data.defaults?.llama || [];
+      defaultsArgs.value = args.join("\n");
+      defaultsModal.classList.remove("is-hidden");
+    } catch (err) {
+      setConfigMessage(err.message, true);
+    }
+  }
+
+  function closeDefaultsModal() {
+    defaultsModal.classList.add("is-hidden");
+  }
+
+  if (defaultsBtn) {
+    defaultsBtn.addEventListener("click", openDefaultsModal);
+  }
+
+  if (defaultsModal) {
+    defaultsModal.addEventListener("click", async (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLButtonElement)) return;
+      const action = target.dataset.action;
+      if (action === "defaults-close" || action === "defaults-cancel") {
+        closeDefaultsModal();
+      } else if (action === "defaults-save") {
+        const args = defaultsArgs.value.split("\n").map((s) => s.trim()).filter(Boolean);
+        try {
+          await api("/api/engine-defaults", {
+            method: "POST",
+            body: JSON.stringify({ engine: "llama", args }),
+          });
+          setConfigMessage("Default params saved");
+          closeDefaultsModal();
+        } catch (err) {
+          setConfigMessage(err.message, true);
+        }
+      }
+    });
+
+    defaultsModal.addEventListener("click", (event) => {
+      if (event.target === defaultsModal) closeDefaultsModal();
+    });
+  }
 }

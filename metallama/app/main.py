@@ -600,5 +600,24 @@ async def update_remote_server_config(server_name: str, payload: dict[str, Any] 
     return {"ok": True, "config": {"name": entry.name, "url": entry.url} if entry else {}}
 
 
+@app.get("/api/engine-defaults")
+def get_engine_defaults() -> dict[str, Any]:
+    from .unified_config import load_unified_config
+    cfg = load_unified_config()
+    return {"defaults": cfg.engine_defaults}
+
+
+@app.post("/api/engine-defaults")
+def set_engine_defaults(payload: dict[str, Any] = Body(...), _guard: None = Depends(admin_guard)) -> dict[str, Any]:
+    from .unified_config import load_unified_config, update_engine_defaults
+    engine = payload.get("engine", "llama")
+    args = payload.get("args", [])
+    if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
+        raise HTTPException(status_code=400, detail="args must be a list of strings")
+    update_engine_defaults(engine, args)
+    cfg = load_unified_config()
+    return {"ok": True, "defaults": cfg.engine_defaults}
+
+
 
 

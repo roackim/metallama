@@ -999,6 +999,7 @@ button:disabled {
 .models-header {
   display: flex;
   justify-content: flex-end;
+  gap: 0.5rem;
   margin-bottom: 0.5rem;
 }
 

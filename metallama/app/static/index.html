@@ -67,6 +67,7 @@
         <hr class="section-separator" />
 
         <div class="models-header">
+          <button id="defaults-btn" class="btn-secondary btn-small admin-only" title="Edit default engine params">⚙ Defaults</button>
           <button id="add-model-btn" class="btn-secondary btn-small admin-only" title="Add a new server">+ Add Server</button>
         </div>
         <div id="models" class="models-list"></div>
@@ -136,6 +137,27 @@
           <button class="btn-danger" data-action="modal-delete" id="modal-delete-btn" style="margin-right: auto;">Delete</button>
           <button class="btn-secondary" data-action="modal-cancel">Cancel</button>
           <button class="btn-primary" data-action="modal-save">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Defaults Modal -->
+    <div id="defaults-modal" class="modal-overlay is-hidden">
+      <div class="modal-dialog" style="max-width: 520px;">
+        <div class="modal-header">
+          <h2>Default Engine Params</h2>
+          <button class="modal-close" data-action="defaults-close" title="Close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="form-hint" style="margin-bottom: 0.5rem; font-size: 0.82rem; opacity: 0.7;">These args are prepended to every llama.cpp server launch. One per line.</p>
+          <div class="form-group">
+            <label for="defaults-args">llama</label>
+            <textarea id="defaults-args" style="min-height: 220px; font-family: monospace;"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" data-action="defaults-cancel">Cancel</button>
+          <button class="btn-primary" data-action="defaults-save">Save</button>
         </div>
       </div>
     </div>
