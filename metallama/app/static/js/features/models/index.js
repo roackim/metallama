@@ -7,6 +7,7 @@ const summaryEl = document.getElementById("summary");
 
 const inFlight = new Map(); // modelId -> "start" | "stop"
 const cardErrors = new Map();
+const slotCache = new Map(); // modelId -> { slots: [...], ts: number }
 
 // ── Edit Modal State ──────────────────────────────────────
 let editingModelId = null;
@@ -442,6 +443,83 @@ function modelStem(model) {
   return fname.replace(/\.gguf$/i, "");
 }
 
+function slotIndicators(model) {
+  if (model.managed === false || model.status !== "online") return "";
+  const cached = slotCache.get(model.id);
+  const par = model.parallel || 1;
+  let slots = cached?.slots;
+  // If we don't have live data yet, render placeholder dots based on PAR count
+  if (!slots) {
+    let html = `<div class="slot-indicators" data-slot-model="${model.id}" title="Loading slot status…">`;
+    for (let i = 0; i < par; i++) {
+      html += `<span class="slot-dot unknown"></span>`;
+    }
+    html += `</div>`;
+    return html;
+  }
+  // If upstream returned fewer slots than PAR, pad; if more, show all
+  const count = Math.max(slots.length, par);
+  let html = `<div class="slot-indicators" data-slot-model="${model.id}" title="${slots.filter(s => s.is_processing).length}/${slots.length} slots busy">`;
+  for (let i = 0; i < count; i++) {
+    const s = slots[i];
+    const cls = !s ? "unknown" : (s.is_processing ? "busy" : "free");
+    html += `<span class="slot-dot ${cls}"></span>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
+async function refreshSlots(models) {
+  const targets = (models || []).filter(
+    (m) => m.managed !== false && m.status === "online" && !inFlight.has(m.id)
+  );
+  if (!targets.length) {
+    // Clear stale cache for servers no longer online
+    for (const key of slotCache.keys()) {
+      if (!targets.some((m) => m.id === key)) slotCache.delete(key);
+    }
+    return;
+  }
+  // Clear stale entries
+  for (const key of slotCache.keys()) {
+    if (!targets.some((m) => m.id === key)) slotCache.delete(key);
+  }
+  const results = await Promise.allSettled(
+    targets.map(async (m) => {
+      const data = await api(`/api/models/${encodeURIComponent(m.id)}/slots`);
+      return { id: m.id, slots: data.slots || [] };
+    })
+  );
+  for (const r of results) {
+    if (r.status === "fulfilled") {
+      slotCache.set(r.value.id, { slots: r.value.slots, ts: Date.now() });
+    }
+  }
+}
+
+function updateSlotIndicators() {
+  // Update only the slot indicator DOM nodes without full re-render
+  document.querySelectorAll(".slot-indicators[data-slot-model]").forEach((el) => {
+    const modelId = el.dataset.slotModel;
+    const cached = slotCache.get(modelId);
+    if (!cached) return;
+    const slots = cached.slots;
+    const busy = slots.filter((s) => s.is_processing).length;
+    el.title = `${busy}/${slots.length} slots busy`;
+    // Rebuild dots
+    const existing = el.querySelectorAll(".slot-dot");
+    slots.forEach((s, i) => {
+      const dot = existing[i];
+      if (!dot) return;
+      const cls = s.is_processing ? "busy" : "free";
+      if (!dot.classList.contains(cls)) {
+        dot.classList.remove("free", "busy", "unknown");
+        dot.classList.add(cls);
+      }
+    });
+  });
+}
+
 function cardTemplate(model) {
   const isManaged = model.managed !== false;
   const action = model.status === "online" ? "stop" : "start";
@@ -461,11 +539,13 @@ function cardTemplate(model) {
   const ctxValue = model.context_window || "";
   const ctxKTokens = ctxValue ? Math.round(ctxValue / 1000) : "";
   const parValue = model.parallel || "";
+  const slotsHtml = slotIndicators(model);
   const ctxDisplay =
     isLLM
       ? `
     <span class="info-item">CTX: ${ctxKTokens}k</span>
     ${parValue ? `<span class="info-item">PAR: ${parValue}</span>` : ""}
+    ${slotsHtml}
   `
       : "";
 
@@ -538,7 +618,10 @@ export async function refreshModels() {
   }
 
   const data = await api("/api/models");
-  renderModels(data.models || []);
+  const models = data.models || [];
+  renderModels(models);
+  // Fetch slot status for online managed servers, then update dots in place
+  refreshSlots(models).then(updateSlotIndicators).catch(() => {});
 }
 
 async function restartModel(modelId) {

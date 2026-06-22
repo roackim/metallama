@@ -463,6 +463,55 @@ def model_status(model_name: str) -> dict[str, Any]:
     return model_payload(profile)
 
 
+@app.get("/api/models/{model_name}/slots")
+async def model_slots(model_name: str) -> Any:
+    """Proxy to a managed llama.cpp server's /slots endpoint.
+
+    Returns a compact list of slot statuses for UI indicators.
+    """
+    import httpx
+
+    from .runtime import status_for
+
+    profile = MODEL_PROFILES.get(model_name)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Unknown model")
+    if status_for(profile) != "online":
+        raise HTTPException(status_code=503, detail="Server not online")
+
+    url = f"http://127.0.0.1:{profile.port}/slots"
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            resp = await client.get(url)
+        if resp.status_code != 200:
+            raise HTTPException(status_code=502, detail=f"Upstream returned {resp.status_code}")
+        data = resp.json()
+    except httpx.ConnectError:
+        raise HTTPException(status_code=502, detail="Could not connect to server")
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Server timed out")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch slots: {exc}")
+
+    # Normalize: llama.cpp returns a list of slot objects
+    slots = []
+    if isinstance(data, list):
+        for s in data:
+            if not isinstance(s, dict):
+                continue
+            slots.append({
+                "id": s.get("id"),
+                "is_processing": bool(s.get("is_processing", False)),
+                "n_ctx": s.get("n_ctx"),
+                "n_prompt_tokens": s.get("n_prompt_tokens", 0),
+                "n_decoded": s.get("n_decoded", 0),
+                "speculative": bool(s.get("speculative", False)),
+            })
+    return {"slots": slots}
+
+
 @app.on_event("startup")
 async def probe_ollama_subservers() -> None:
     await probe_subservers()
