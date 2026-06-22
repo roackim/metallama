@@ -8,44 +8,6 @@ from pydantic import BaseModel, Field
 
 
 # ---------------------------------------------------------------------------
-# Engine defaults – structured representation of llama.cpp flags
-# ---------------------------------------------------------------------------
-
-class LlamaEngineDefaults(BaseModel):
-    flash_attn: str = "on"
-    threads: int = 6
-    n_gpu_layers: int = 999
-    sleep_idle_seconds: int = -1
-    fit: str = "off"
-    no_cont_batching: bool = True
-    cache_ram: int = 16384
-    kv_unified: bool = True
-
-    def to_cli_args(self) -> list[str]:
-        """Convert structured defaults to flat CLI argument list."""
-        args: list[str] = []
-        mapping = [
-            ("flash_attn", "--flash-attn"),
-            ("threads", "--threads"),
-            ("n_gpu_layers", "--n-gpu-layers"),
-            ("sleep_idle_seconds", "--sleep-idle-seconds"),
-            ("fit", "--fit"),
-            ("cache_ram", "--cache-ram"),
-        ]
-        for attr, flag in mapping:
-            value = getattr(self, attr)
-            args.extend([flag, str(value)])
-
-        # Boolean flags (present = enabled)
-        if self.no_cont_batching:
-            args.append("--no-cont-batching")
-        if self.kv_unified:
-            args.append("--kv-unified")
-
-        return args
-
-
-# ---------------------------------------------------------------------------
 # Managed server (owned local model)
 # ---------------------------------------------------------------------------
 
@@ -80,7 +42,7 @@ class RemoteServer(BaseModel):
 # ---------------------------------------------------------------------------
 
 class UnifiedConfig(BaseModel):
-    engine_defaults: dict[str, LlamaEngineDefaults] = Field(default_factory=dict)
+    engine_defaults: dict[str, list[str]] = Field(default_factory=dict)
     managed_servers: list[ManagedServer] = Field(default_factory=list)
     remote_servers: list[RemoteServer] = Field(default_factory=list)
 
@@ -122,11 +84,9 @@ def load_unified_config(path: str | Path = "config.yaml") -> UnifiedConfig:
 
     # Use `or {}` / `or []` to handle None from YAML (e.g. key present but empty)
     engine_defaults_raw = raw.get("engine_defaults") or {}
-    engine_defaults = {}
+    engine_defaults: dict[str, list[str]] = {}
     for engine_name, defaults in engine_defaults_raw.items():
-        if defaults is None:
-            defaults = {}
-        engine_defaults[engine_name] = LlamaEngineDefaults(**defaults)
+        engine_defaults[engine_name] = defaults if isinstance(defaults, list) else []
 
     managed = [ManagedServer(**entry) for entry in (raw.get("managed_servers") or []) if entry]
     remote = [RemoteServer(**entry) for entry in (raw.get("remote_servers") or []) if entry]
@@ -227,11 +187,7 @@ def _yaml_str_value(value: Any) -> str:
     if isinstance(value, int):
         return str(value)
     if isinstance(value, str):
-        # Quote strings that could be misinterpreted (booleans, numbers, special chars).
-        needs_quote = False
-        lower = value.lower()
-        if lower in ("true", "false", "null", "on", "off", "yes", "no"):
-            needs_quote = True
+        needs_quote = value.lower() in ("true", "false", "null", "on", "off", "yes", "no")
         try:
             int(value)
             needs_quote = True
@@ -277,14 +233,17 @@ def save_unified_config(config: UnifiedConfig, path: str | Path = "config.yaml")
     # --- engine_defaults ---
     lines.append("# ---------------------------------------------------------------------------")
     lines.append("# Engine Defaults (Machine-Managed)")
-    lines.append("# Default parameters applied to all llama.cpp servers unless overridden.")
-    lines.append("# These are prepended before profile-specific args (last flag wins).")
+    lines.append("# Default CLI args prepended to every server launch for this engine.")
+    lines.append("# Last flag wins when merged with per-server args.")
     lines.append("# ---------------------------------------------------------------------------")
     lines.append("engine_defaults:")
-    for engine_name, defaults in config.engine_defaults.items():
+    for engine_name, args in config.engine_defaults.items():
         lines.append(f"  {engine_name}:")
-        for key, value in defaults.model_dump().items():
-            lines.append(f"    {key}: {_yaml_str_value(value)}")
+        if args:
+            for arg in args:
+                lines.append(f"    - {arg}")
+        else:
+            lines.append("    []")
     lines.append("")
 
     # --- managed_servers ---

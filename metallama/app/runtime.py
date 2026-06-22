@@ -22,10 +22,7 @@ model_locks: dict[str, asyncio.Lock] = {key: asyncio.Lock() for key in MODEL_PRO
 def _get_engine_default_args(engine: str) -> list[str]:
     """Get default CLI args for an engine from unified config."""
     config = load_unified_config()
-    defaults = config.engine_defaults.get(engine)
-    if defaults and hasattr(defaults, "to_cli_args"):
-        return defaults.to_cli_args()
-    return []
+    return config.engine_defaults.get(engine) or []
 
 
 def get_profile_with_config(profile: ModelProfile) -> ModelProfile:
