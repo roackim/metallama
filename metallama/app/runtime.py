@@ -228,6 +228,7 @@ def model_payload(profile: ModelProfile) -> dict[str, Any]:
         "context_window": profile.context_window,
         "parallel": profile.parallel,
         "extra_args": profile.extra_args,
+        "model_draft": profile.model_draft,
         "model_found": model_found,
         "managed": True,
     }
