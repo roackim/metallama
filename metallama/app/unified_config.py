@@ -93,7 +93,11 @@ _CONFIG_CACHE: dict[str, UnifiedConfig] = {}
 
 
 def load_unified_config(path: str | Path = "config.yaml") -> UnifiedConfig:
-    """Load the unified config.yaml from project root."""
+    """Load the unified config.yaml from project root.
+
+    If the file doesn't exist or sections are missing/malformed, returns a
+    config with safe defaults so the server can still start.
+    """
     config_path = Path(path)
     if not config_path.is_absolute():
         # Resolve relative to project root (two levels up from this file: app/ -> metallama/ -> project root).
@@ -103,16 +107,29 @@ def load_unified_config(path: str | Path = "config.yaml") -> UnifiedConfig:
     if cache_key in _CONFIG_CACHE:
         return _CONFIG_CACHE[cache_key]
 
-    with config_path.open() as fh:
-        raw = yaml.safe_load(fh) or {}
+    if not config_path.exists():
+        config = UnifiedConfig()
+        _CONFIG_CACHE[cache_key] = config
+        return config
 
-    engine_defaults_raw = raw.get("engine_defaults", {})
+    try:
+        with config_path.open() as fh:
+            raw = yaml.safe_load(fh) or {}
+    except Exception:
+        config = UnifiedConfig()
+        _CONFIG_CACHE[cache_key] = config
+        return config
+
+    # Use `or {}` / `or []` to handle None from YAML (e.g. key present but empty)
+    engine_defaults_raw = raw.get("engine_defaults") or {}
     engine_defaults = {}
     for engine_name, defaults in engine_defaults_raw.items():
+        if defaults is None:
+            defaults = {}
         engine_defaults[engine_name] = LlamaEngineDefaults(**defaults)
 
-    managed = [ManagedServer(**entry) for entry in raw.get("managed_servers", [])]
-    remote = [RemoteServer(**entry) for entry in raw.get("remote_servers", [])]
+    managed = [ManagedServer(**entry) for entry in (raw.get("managed_servers") or []) if entry]
+    remote = [RemoteServer(**entry) for entry in (raw.get("remote_servers") or []) if entry]
 
     config = UnifiedConfig(
         engine_defaults=engine_defaults,
