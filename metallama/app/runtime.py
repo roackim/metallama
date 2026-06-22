@@ -118,9 +118,12 @@ def build_command_preview(profile: ModelProfile) -> tuple[list[str], bool]:
     profile = get_profile_with_config(profile)
     binary, found = _resolve_binary_or_placeholder(profile)
 
-    extra_args = (
-        _get_engine_default_args(profile.engine) + list(profile.extra_args)
-    )
+    # Tokenize: split each arg on whitespace so "--flash-attn on" → ["--flash-attn", "on"]
+    extra_args = [
+        token
+        for arg in _get_engine_default_args(profile.engine) + list(profile.extra_args)
+        for token in arg.split()
+    ]
 
     if profile.engine == "llama" and profile.context_window is not None:
         extra_args = _strip_flag(extra_args, "--ctx-size")
@@ -154,9 +157,12 @@ def build_command(profile: ModelProfile) -> list[str]:
     profile = get_profile_with_config(profile)
     binary = _resolve_binary(profile)
 
-    extra_args = (
-        _get_engine_default_args(profile.engine) + list(profile.extra_args)
-    )
+    # Tokenize: split each arg on whitespace so "--flash-attn on" → ["--flash-attn", "on"]
+    extra_args = [
+        token
+        for arg in _get_engine_default_args(profile.engine) + list(profile.extra_args)
+        for token in arg.split()
+    ]
 
     if profile.engine == "llama" and profile.context_window is not None:
         extra_args = _strip_flag(extra_args, "--ctx-size")
