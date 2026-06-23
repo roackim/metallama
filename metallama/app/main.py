@@ -494,7 +494,7 @@ async def model_slots(model_name: str) -> Any:
         slots_url = f"{base}/slots"
 
     try:
-        async with httpx.AsyncClient(timeout=2.0) as client:
+        async with httpx.AsyncClient(timeout=1.5) as client:
             resp = await client.get(slots_url)
         if resp.status_code != 200:
             raise HTTPException(status_code=502, detail=f"Upstream returned {resp.status_code}")

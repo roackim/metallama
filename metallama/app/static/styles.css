@@ -611,7 +611,8 @@ body {
   color: var(--text);
 }
 
-.btn-action-start.disabled-remote {
+.btn-action-start.disabled-remote,
+.disabled-readonly {
   background: transparent;
   border-color: var(--line);
   color: var(--muted);
@@ -1324,6 +1325,15 @@ body.admin-locked .admin-only {
 
 /* Always visible when admin (or auth disabled) */
 body.is-admin .admin-only {
+  display: inline-flex;
+}
+
+/* Disabled button for non-admin users (local servers) */
+body.is-admin .disabled-readonly {
+  display: none !important;
+}
+
+body.admin-locked .disabled-readonly {
   display: inline-flex;
 }
 

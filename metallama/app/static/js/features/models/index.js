@@ -8,6 +8,8 @@ const summaryEl = document.getElementById("summary");
 const inFlight = new Map(); // modelId -> "start" | "stop"
 const cardErrors = new Map();
 const slotCache = new Map(); // modelId -> { slots: [...], ts: number }
+let lastSlotRefresh = 0;
+const SLOT_REFRESH_INTERVAL = 10000; // ms — avoid hammering /slots during inference
 
 // ── Edit Modal State ──────────────────────────────────────
 let editingModelId = null;
@@ -583,7 +585,8 @@ function cardTemplate(model) {
 
         <div class="card-actions-col">
           ${isManaged
-            ? `<button class="btn-action-${action} admin-only" data-id="${model.id}" data-action="${action}" ${canRunAction ? "" : "disabled"}>${label}</button>`
+            ? `<button class="btn-action-${action} admin-only" data-id="${model.id}" data-action="${action}" ${canRunAction ? "" : "disabled"}>${label}</button>
+               <button class="btn-action-${action} disabled-readonly" disabled title="Admin access required">${label}</button>`
             : `<button class="btn-action-start disabled-remote" disabled title="Remote servers cannot be managed from here">${model.status === "online" ? "Stop" : "Start"}</button>`
           }
         </div>
@@ -621,8 +624,15 @@ export async function refreshModels() {
   const data = await api("/api/models");
   const models = data.models || [];
   renderModels(models);
-  // Fetch slot status for online managed servers, then update dots in place
-  refreshSlots(models).then(updateSlotIndicators).catch(() => {});
+  // Fetch slot status on a throttled cadence (every 5s) to avoid contending
+  // with active inference. Non-blocking so it never delays the next refresh.
+  const now = Date.now();
+  if (now - lastSlotRefresh >= SLOT_REFRESH_INTERVAL) {
+    lastSlotRefresh = now;
+    refreshSlots(models).then(updateSlotIndicators).catch(() => {});
+  } else {
+    updateSlotIndicators();
+  }
 }
 
 async function restartModel(modelId) {
