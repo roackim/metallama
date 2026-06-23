@@ -9,7 +9,7 @@ const inFlight = new Map(); // modelId -> "start" | "stop"
 const cardErrors = new Map();
 const slotCache = new Map(); // modelId -> { slots: [...], ts: number }
 let lastSlotRefresh = 0;
-const SLOT_REFRESH_INTERVAL = 10000; // ms — avoid hammering /slots during inference
+const SLOT_REFRESH_INTERVAL = 5000; // ms — avoid hammering /slots during inference
 
 // ── Edit Modal State ──────────────────────────────────────
 let editingModelId = null;
