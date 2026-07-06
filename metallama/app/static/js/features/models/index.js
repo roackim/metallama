@@ -7,7 +7,15 @@ const summaryEl = document.getElementById("summary");
 
 const inFlight = new Map(); // modelId -> "start" | "stop"
 const cardErrors = new Map();
+const openLogs = new Set(); // modelIds with an open log panel
+const logState = new Map(); // modelId -> { since, text, pinned }
+const dismissedExits = new Map(); // modelId -> last_exit.at that the user dismissed
+let logTimer = null;
+const LOG_POLL_INTERVAL = 1000; // ms
+const LOG_TEXT_CAP = 500000; // chars kept per panel
 const slotCache = new Map(); // modelId -> { slots: [...], ts: number }
+let filterText = ""; // server name filter
+let filterStatus = "all"; // all | running | offline
 let lastSlotRefresh = 0;
 const SLOT_REFRESH_INTERVAL = 5000; // ms — avoid hammering /slots during inference
 
@@ -222,7 +230,7 @@ function openEditModal(modelId, isManaged) {
   });
 }
 
-function openCreateModal(type) {
+function openCreateModal(type, prefill = null) {
   modalMode = "create";
   editingModelId = null;
   const isManaged = type === "managed";
@@ -238,23 +246,31 @@ function openCreateModal(type) {
   document.getElementById("modal-title").textContent = isManaged ? "Add Local Server" : "Add Remote Server";
   if (isManaged) {
     loadModelFiles().then((mdata) => {
-      populateModelSelector(mdata.files || [], "");
+      populateModelSelector(mdata.files || [], prefill?.model_path || "");
       populateModelDraftSelector(mdata.files || [], "");
+      if (prefill?.model_path) {
+        const stem = prefill.model_path.replace(/^.*[\\/]/, "").replace(/\.gguf$/i, "");
+        document.getElementById("edit-name").value = stem;
+      }
     });
-    // Pre-fill defaults: port = max + 1, CTX = 32K, PAR = 2
-    api("/api/models").then((data) => {
-      const models = data.models || [];
-      const maxPort = models.reduce((max, m) => {
-        if (m.managed && m.port && m.port > max) return m.port;
-        return max;
-      }, 0);
-      document.getElementById("edit-port").value = maxPort > 0 ? maxPort + 1 : 8080;
-      document.getElementById("edit-context-window").value = 32000;
-      document.getElementById("edit-parallel").value = 2;
-    });
+    // Pre-fill defaults: backend-suggested free port, CTX = 32K, PAR = 1
+    api("/api/ports/suggest")
+      .then((data) => {
+        document.getElementById("edit-port").value = data.port;
+      })
+      .catch(() => {
+        document.getElementById("edit-port").value = 8080;
+      });
+    document.getElementById("edit-context-window").value = 32000;
+    document.getElementById("edit-parallel").value = 1;
   }
   document.getElementById("edit-modal").classList.remove("is-hidden");
   document.getElementById("modal-delete-btn").classList.add("is-hidden");
+}
+
+// Open the create modal pre-filled for a freshly downloaded model file.
+export function openCreateForModel(modelPath) {
+  openCreateModal("managed", { model_path: modelPath });
 }
 
 function closeEditModal() {
@@ -269,6 +285,7 @@ async function deleteModal() {
   try {
     await api(`/api/models/${encodeURIComponent(name)}`, { method: "DELETE" });
     setConfigMessage(`Server "${name}" deleted`);
+      window.__metallamaRefreshLibrary?.();
     closeEditModal();
     await refreshModels();
   } catch (err) {
@@ -378,6 +395,7 @@ async function saveCreateModal() {
         body: JSON.stringify(payload),
       });
       setConfigMessage(`Server "${newName}" created`);
+      window.__metallamaRefreshLibrary?.();
       closeEditModal();
       await refreshModels();
     } catch (err) {
@@ -395,6 +413,7 @@ async function saveCreateModal() {
         body: JSON.stringify({ type: "remote", name: newName, url: newUrl }),
       });
       setConfigMessage(`Remote server "${newName}" created`);
+      window.__metallamaRefreshLibrary?.();
       closeEditModal();
       await refreshModels();
     } catch (err) {
@@ -421,12 +440,42 @@ function escapeHtml(s) {
   return d.innerHTML;
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 function canStart(model) {
   return model.status === "offline" && !inFlight.has(model.id);
 }
 
 function canStop(model) {
-  return model.status === "online" && !inFlight.has(model.id);
+  return (model.status === "online" || model.status === "starting") && !inFlight.has(model.id);
+}
+
+function formatElapsed(seconds) {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return m ? `${m}m ${String(s).padStart(2, "0")}s` : `${s}s`;
+}
+
+function loadingStripHtml(model) {
+  if (model.status !== "starting") return "";
+  const elapsed = model.started_at
+    ? Math.max(0, Math.round(Date.now() / 1000 - model.started_at))
+    : 0;
+  const progress = typeof model.load_progress === "number" ? model.load_progress : null;
+  const pct = progress !== null ? Math.round(progress * 100) : null;
+  const bar =
+    pct !== null
+      ? `<div class="loading-bar"><div class="loading-bar-fill determinate" style="width: ${pct}%"></div></div>`
+      : `<div class="loading-bar"><div class="loading-bar-fill"></div></div>`;
+  const label = pct !== null ? `Loading model… ${pct}% (${formatElapsed(elapsed)})` : `Loading model… ${formatElapsed(elapsed)}`;
+  return `
+    <div class="loading-strip">
+      ${bar}
+      <div class="loading-info">
+        <span class="loading-elapsed">${label}</span>
+        ${model.last_log ? `<span class="loading-lastlog" title="${escapeHtml(model.last_log)}">${escapeHtml(model.last_log)}</span>` : ""}
+      </div>
+    </div>`;
 }
 
 function modelTypeLabel(model) {
@@ -519,9 +568,93 @@ function updateSlotIndicators() {
   });
 }
 
+// ── Server logs panel ─────────────────────────────────────
+function updateLogPanel(modelId) {
+  const panel = document.querySelector(`.log-panel[data-log-model="${CSS.escape(modelId)}"]`);
+  if (!panel) return;
+  const pre = panel.querySelector(".log-output");
+  const st = logState.get(modelId);
+  if (!pre || !st) return;
+  pre.textContent = st.text || "(no output yet)";
+  pre.onscroll = () => {
+    st.pinned = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 8;
+  };
+  if (st.pinned !== false) pre.scrollTop = pre.scrollHeight;
+}
+
+function hydrateLogPanels() {
+  for (const id of openLogs) updateLogPanel(id);
+}
+
+async function pollLogs() {
+  for (const id of openLogs) {
+    const st = logState.get(id);
+    if (!st) continue;
+    try {
+      const data = await api(`/api/models/${encodeURIComponent(id)}/logs?since=${st.since}`);
+      const lines = data.lines || [];
+      if (lines.length) {
+        st.text += (st.text ? "\n" : "") + lines.map((l) => l.text).join("\n");
+        if (st.text.length > LOG_TEXT_CAP) {
+          st.text = st.text.slice(st.text.indexOf("\n", st.text.length - LOG_TEXT_CAP) + 1);
+        }
+        st.since = data.next;
+        updateLogPanel(id);
+      }
+    } catch {
+      // server unreachable or model deleted — keep panel, retry next tick
+    }
+  }
+}
+
+function ensureLogTimer() {
+  if (openLogs.size && !logTimer) {
+    logTimer = setInterval(() => pollLogs().catch(() => {}), LOG_POLL_INTERVAL);
+  } else if (!openLogs.size && logTimer) {
+    clearInterval(logTimer);
+    logTimer = null;
+  }
+}
+
+async function toggleLogs(modelId) {
+  if (openLogs.has(modelId)) {
+    openLogs.delete(modelId);
+    document
+      .querySelector(`.log-panel[data-log-model="${CSS.escape(modelId)}"]`)
+      ?.classList.add("is-hidden");
+  } else {
+    openLogs.add(modelId);
+    logState.set(modelId, { since: 0, text: "", pinned: true });
+    document
+      .querySelector(`.log-panel[data-log-model="${CSS.escape(modelId)}"]`)
+      ?.classList.remove("is-hidden");
+    await pollLogs().catch(() => {});
+    updateLogPanel(modelId);
+  }
+  ensureLogTimer();
+}
+
+function exitBannerHtml(model) {
+  const exit = model.last_exit;
+  if (!exit) return "";
+  if (dismissedExits.get(model.id) === String(exit.at)) return "";
+  const tail = (exit.tail || []).slice(-5).join("\n");
+  return `
+    <div class="card-exit-banner">
+      <div class="exit-banner-head">
+        <span class="exit-banner-title">⚠ Server exited unexpectedly (exit code ${exit.code})</span>
+        <span class="exit-banner-actions">
+          <button class="btn-secondary btn-small" data-id="${model.id}" data-action="logs">Logs</button>
+          <button class="btn-secondary btn-small" data-id="${model.id}" data-action="dismiss-exit" data-at="${exit.at}">Dismiss</button>
+        </span>
+      </div>
+      ${tail ? `<pre class="exit-banner-tail">${escapeHtml(tail)}</pre>` : ""}
+    </div>`;
+}
+
 function cardTemplate(model) {
   const isManaged = model.managed !== false;
-  const action = model.status === "online" ? "stop" : "start";
+  const action = model.status === "online" || model.status === "starting" ? "stop" : "start";
   const label = action === "stop" ? "Stop" : "Start";
   const canRunAction = action === "stop" ? canStop(model) : canStart(model);
   const type = modelTypeLabel(model);
@@ -539,11 +672,22 @@ function cardTemplate(model) {
   const ctxKTokens = ctxValue ? Math.round(ctxValue / 1000) : "";
   const parValue = model.parallel || "";
   const slotsHtml = slotIndicators(model);
+  const est = model.vram_estimate;
+  const estWarn = est && est.likely_fits === false && model.status === "offline";
+  const estTitle = est
+    ? `Estimated VRAM (upper bound): weights ≈ ${est.weights_gb} GB + KV cache ≈ ${est.kv_cache_gb} GB + ~1 GB overhead.` +
+      (est.free_vram_gb != null ? ` Free VRAM now: ${est.free_vram_gb} GB.` : "") +
+      (estWarn ? " Likely will NOT fit — reduce context, parallel slots, or use a smaller quant." : "")
+    : "";
+  const estChip = est
+    ? `<span class="info-item vram-est${estWarn ? " warn" : ""}" title="${escapeHtml(estTitle)}">≈${est.total_gb} GB${estWarn ? " ⚠" : ""}</span>`
+    : "";
   const ctxDisplay =
     isLLM
       ? `
     <span class="info-item">CTX: ${ctxKTokens}k</span>
     ${parValue ? `<span class="info-item">PAR: ${parValue}</span>` : ""}
+    ${estChip}
   `
       : "";
 
@@ -569,12 +713,14 @@ function cardTemplate(model) {
           <div class="endpoint-row">
             <span class="endpoint-label">URL:</span>
             <a class="endpoint-link" href="${model.url}" target="_blank">${model.url}</a>
+            ${model.status === "online" ? `<button class="btn-secondary btn-small btn-chat" data-id="${model.id}" data-action="open" data-url="${model.url}" title="Open llama.cpp's chat UI">Chat ↗</button>` : ""}
           </div>
 
           <div class="info-row">
             ${isManaged && model.pid !== undefined ? `<span class="info-item">PID: ${model.pid ?? "-"}</span>` : ""}
             ${ctxDisplay}
             ${isManaged ? `<button class="btn-secondary btn-small admin-only" data-id="${model.id}" data-action="cmd" title="Copy launch command">CMD</button>` : ""}
+            ${isManaged ? `<button class="btn-secondary btn-small ${openLogs.has(model.id) ? "active" : ""}" data-id="${model.id}" data-action="logs" title="Show server logs">Logs</button>` : ""}
             <button class="btn-secondary btn-small admin-only" data-id="${model.id}" data-managed="${isManaged}" data-action="edit" title="Edit server config">Edit</button>
           </div>
         </div>
@@ -592,8 +738,17 @@ function cardTemplate(model) {
         </div>
       </div>
 
-      <p class="${cardErrorClass}" aria-live="polite">${cardError}</p>
+      ${loadingStripHtml(model)}
+      <p class="${cardErrorClass}" aria-live="polite">${escapeHtml(cardError)}</p>
       ${modelWarning}
+      ${exitBannerHtml(model)}
+      ${isManaged ? `<div class="log-panel ${openLogs.has(model.id) ? "" : "is-hidden"}" data-log-model="${model.id}">
+        <div class="log-panel-head">
+          <span class="log-panel-title">Server logs</span>
+          <a class="log-open-page" href="/static/logs.html?model=${encodeURIComponent(model.id)}" target="_blank" rel="noopener" title="Open full log view in a new tab">Full view ↗</a>
+        </div>
+        <pre class="log-output"></pre>
+      </div>` : ""}
 
       <div class="${overlayClass}">
         <div class="overlay-content">
@@ -610,9 +765,28 @@ function renderModels(models) {
     return;
   }
 
-  modelsEl.innerHTML = models.map(cardTemplate).join("");
+  // Drop log-panel state for models that no longer exist
+  for (const id of openLogs) {
+    if (!models.some((m) => m.id === id)) {
+      openLogs.delete(id);
+      logState.delete(id);
+    }
+  }
+  ensureLogTimer();
+
+  const needle = filterText.trim().toLowerCase();
+  const visible = models.filter((m) => {
+    if (needle && !`${m.display_name} ${modelStem(m)}`.toLowerCase().includes(needle)) return false;
+    if (filterStatus === "running") return m.status === "online" || m.status === "starting";
+    if (filterStatus === "offline") return m.status === "offline";
+    return true;
+  });
+
+  modelsEl.innerHTML = visible.map(cardTemplate).join("");
+  hydrateLogPanels();
+  document.getElementById("models-filter-empty")?.classList.toggle("is-hidden", visible.length > 0 || models.length === 0);
   const running = models.filter((m) => m.status === "online").length;
-  summaryEl.textContent = `${running} / ${models.length} ACTIVE SERVERS`;
+  summaryEl.textContent = `${running} / ${models.length} running`;
 }
 
 export async function refreshModels() {
@@ -635,6 +809,26 @@ export async function refreshModels() {
   }
 }
 
+async function waitForStop(modelId) {
+  for (let i = 0; i < 60; i++) {
+    const data = await api(`/api/models/${modelId}/status`);
+    if (data.status === "offline") return;
+    await sleep(500);
+  }
+  throw new Error("Timed out waiting for server to stop (30s).");
+}
+
+// After a start request, only wait until the process is up ("starting" or
+// "online"). Model loading can take minutes; the card's loading strip tracks
+// it, and a crash surfaces through the unexpected-exit banner.
+async function waitForSpawn(modelId) {
+  for (let i = 0; i < 10; i++) {
+    await sleep(500);
+    const data = await api(`/api/models/${modelId}/status`);
+    if (data.status !== "offline") return;
+  }
+}
+
 async function restartModel(modelId) {
   inFlight.set(modelId, "restart");
   await refreshModels();
@@ -642,24 +836,9 @@ async function restartModel(modelId) {
   try {
     await api(`/api/models/${modelId}/stop`, { method: "POST" });
     setCardError(modelId, "");
-
-    for (let i = 0; i < 60; i++) {
-      const data = await api(`/api/models/${modelId}/status`);
-      if (data.status === "offline") break;
-      await new Promise((r) => setTimeout(r, 500));
-    }
-
+    await waitForStop(modelId);
     await api(`/api/models/${modelId}/start`, { method: "POST" });
-
-    for (let i = 0; i < 60; i++) {
-      await new Promise((r) => setTimeout(r, 500));
-      const data = await api(`/api/models/${modelId}/status`);
-      if (data.status === "online") return;
-      if (data.status === "offline" && i > 1) {
-        throw new Error("Server process exited unexpectedly after restart. Check CMD for details.");
-      }
-    }
-    throw new Error("Timed out waiting for server to come online after restart (30s).");
+    await waitForSpawn(modelId);
   } finally {
     inFlight.delete(modelId);
     await refreshModels();
@@ -671,27 +850,33 @@ async function startStop(modelId, action) {
     return restartModel(modelId);
   }
 
-  const targetStatus = action === "start" ? "online" : "offline";
+  if (action === "start") {
+    try {
+      const m = await api(`/api/models/${encodeURIComponent(modelId)}/status`);
+      const est = m.vram_estimate;
+      if (est && est.likely_fits === false) {
+        const ok = window.confirm(
+          `This model is estimated to need ≈${est.total_gb} GB VRAM ` +
+          `(weights ${est.weights_gb} GB + KV cache ${est.kv_cache_gb} GB), ` +
+          `but only ${est.free_vram_gb} GB is free.\n\n` +
+          `It will likely fail to load or run partially on CPU. Start anyway?`
+        );
+        if (!ok) return;
+      }
+    } catch {
+      // estimate unavailable — proceed
+    }
+  }
+
   inFlight.set(modelId, action);
   await refreshModels();
   try {
-    const startResp = await api(`/api/models/${modelId}/${action}`, { method: "POST" });
+    await api(`/api/models/${modelId}/${action}`, { method: "POST" });
     setCardError(modelId, "");
-
-    for (let i = 0; i < 60; i++) {
-      await new Promise((r) => setTimeout(r, 500));
-      const data = await api(`/api/models/${modelId}/status`);
-      if (data.status === targetStatus) {
-        return; // success
-      }
-      // Process died during startup — stop polling and report
-      if (action === "start" && data.status === "offline" && i > 1) {
-        throw new Error("Server process exited unexpectedly. Check the launch command (CMD) for details.");
-      }
-    }
-    // Timed out
     if (action === "start") {
-      throw new Error("Timed out waiting for server to come online (30s).");
+      await waitForSpawn(modelId);
+    } else {
+      await waitForStop(modelId);
     }
   } finally {
     inFlight.delete(modelId);
@@ -743,6 +928,18 @@ export function setupModels() {
         return;
       }
 
+      if (action === "logs") {
+        await toggleLogs(modelId);
+        await refreshModels();
+        return;
+      }
+
+      if (action === "dismiss-exit") {
+        dismissedExits.set(modelId, target.dataset.at || "");
+        await refreshModels();
+        return;
+      }
+
       if (action === "edit") {
         const isManaged = target.dataset.managed !== "false";
         openEditModal(modelId, isManaged);
@@ -787,6 +984,24 @@ export function setupModels() {
       }
     });
   }
+
+  // ── Server filter controls ────────────────────────────
+  const filterInput = document.getElementById("server-filter");
+  if (filterInput) {
+    filterInput.addEventListener("input", () => {
+      filterText = filterInput.value;
+      refreshModels().catch(() => {});
+    });
+  }
+  document.querySelectorAll(".status-filter .chip-btn").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      filterStatus = chip.dataset.status || "all";
+      document.querySelectorAll(".status-filter .chip-btn").forEach((c) => {
+        c.classList.toggle("active", c === chip);
+      });
+      refreshModels().catch(() => {});
+    });
+  });
 
   // ── Add Server button ─────────────────────────────────
   const addBtn = document.getElementById("add-model-btn");

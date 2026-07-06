@@ -18,12 +18,6 @@ export function setupThemeSwitcher(onThemeApplied) {
     const theme = themePreference === "system" ? resolveSystemTheme() : themePreference;
     document.documentElement.dataset.theme = theme;
 
-    const titleLogo = document.getElementById("hero-logo");
-    if (titleLogo) {
-      titleLogo.src =
-        theme === "dark" ? "/static/assets/logo-carre-blanc.svg" : "/static/assets/logo-carre-noir.svg";
-    }
-
     themeButtons.forEach((button) => {
       const isActive = button.dataset.theme === themePreference;
       button.classList.toggle("active", isActive);

@@ -12,7 +12,7 @@ from ..registry import get_subserver, get_all_subservers
 
 router = APIRouter()
 
-_TIMEOUT = httpx.Timeout(connect=5.0, read=300.0, write=30.0, pool=5.0)
+_TIMEOUT = httpx.Timeout(connect=5.0, read=600.0, write=30.0, pool=5.0)
 _HEALTH_TIMEOUT = httpx.Timeout(1.0)
 
 

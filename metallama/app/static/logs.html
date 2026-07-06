@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Logs — Metallama</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body class="logs-page">
+    <header class="logs-page-head">
+      <div class="logs-page-head-left">
+        <a class="logs-back" href="/" title="Back to Metallama">← Metallama</a>
+        <h1 id="logs-title" class="logs-page-title">Logs</h1>
+        <span id="logs-status" class="status-badge offline">unknown</span>
+      </div>
+      <div class="logs-page-head-right">
+        <label class="logs-follow-label">
+          <input type="checkbox" id="logs-follow" checked /> Follow
+        </label>
+        <button id="logs-clear" class="btn-secondary btn-small" type="button" title="Clear the view (does not delete the log file)">Clear view</button>
+        <span id="logs-file" class="logs-file-path" title="Log file on disk"></span>
+      </div>
+    </header>
+    <pre id="logs-output" class="logs-page-output">Loading…</pre>
+
+    <script type="module">
+      const params = new URLSearchParams(location.search);
+      const model = params.get("model") || "";
+      const titleEl = document.getElementById("logs-title");
+      const statusEl = document.getElementById("logs-status");
+      const fileEl = document.getElementById("logs-file");
+      const outEl = document.getElementById("logs-output");
+      const followEl = document.getElementById("logs-follow");
+
+      document.title = `${model} logs — Metallama`;
+      titleEl.textContent = model || "(no model)";
+      // Apply saved theme
+      const theme = localStorage.getItem("metallama.theme");
+      const resolved = theme === "system" || !theme
+        ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+        : theme;
+      document.documentElement.dataset.theme = resolved;
+
+      let since = 0;
+      let cleared = false;
+
+      document.getElementById("logs-clear").addEventListener("click", () => {
+        outEl.textContent = "";
+        cleared = true;
+      });
+
+      outEl.addEventListener("scroll", () => {
+        const pinned = outEl.scrollTop + outEl.clientHeight >= outEl.scrollHeight - 10;
+        if (!pinned) followEl.checked = false;
+      });
+
+      async function poll() {
+        if (!model) {
+          outEl.textContent = "No model specified — open this page from a server card.";
+          return;
+        }
+        try {
+          const r = await fetch(`/api/models/${encodeURIComponent(model)}/logs?since=${since}`);
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const data = await r.json();
+          const lines = data.lines || [];
+          if (lines.length) {
+            if (since === 0 && !cleared) outEl.textContent = "";
+            outEl.textContent += lines.map((l) => l.text).join("\n") + "\n";
+            since = data.next;
+            if (followEl.checked) outEl.scrollTop = outEl.scrollHeight;
+          }
+          statusEl.textContent = data.running ? "running" : "stopped";
+          statusEl.className = `status-badge ${data.running ? "online" : "offline"}`;
+          if (data.log_file) fileEl.textContent = data.log_file;
+        } catch (err) {
+          statusEl.textContent = "unreachable";
+          statusEl.className = "status-badge offline";
+        }
+      }
+
+      poll();
+      setInterval(poll, 1000);
+    </script>
+  </body>
+</html>

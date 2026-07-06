@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+import logging
+import os
 from pathlib import Path
 from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
+
+# Overridable so tests / secondary instances can use an isolated config file
+# instead of the shared repo-root config.yaml.
+DEFAULT_CONFIG_PATH = os.getenv("METALLAMA_CONFIG_FILE", "config.yaml")
 
 
 # ---------------------------------------------------------------------------
@@ -55,13 +63,13 @@ class UnifiedConfig(BaseModel):
 _CONFIG_CACHE: dict[str, UnifiedConfig] = {}
 
 
-def load_unified_config(path: str | Path = "config.yaml") -> UnifiedConfig:
+def load_unified_config(path: str | Path | None = None) -> UnifiedConfig:
     """Load the unified config.yaml from project root.
 
     If the file doesn't exist or sections are missing/malformed, returns a
     config with safe defaults so the server can still start.
     """
-    config_path = Path(path)
+    config_path = Path(path or DEFAULT_CONFIG_PATH)
     if not config_path.is_absolute():
         # Resolve relative to project root (two levels up from this file: app/ -> metallama/ -> project root).
         config_path = Path(__file__).resolve().parents[2] / config_path
@@ -71,6 +79,7 @@ def load_unified_config(path: str | Path = "config.yaml") -> UnifiedConfig:
         return _CONFIG_CACHE[cache_key]
 
     if not config_path.exists():
+        logger.info("Config file not found at %s, using defaults", config_path)
         config = UnifiedConfig()
         _CONFIG_CACHE[cache_key] = config
         return config
@@ -78,10 +87,14 @@ def load_unified_config(path: str | Path = "config.yaml") -> UnifiedConfig:
     try:
         with config_path.open() as fh:
             raw = yaml.safe_load(fh) or {}
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to parse config file %s: %s — using defaults", config_path, exc)
         config = UnifiedConfig()
         _CONFIG_CACHE[cache_key] = config
         return config
+
+    if not raw:
+        logger.info("Config file %s is empty — using defaults", config_path)
 
     # Use `or {}` / `or []` to handle None from YAML (e.g. key present but empty)
     engine_defaults_raw = raw.get("engine_defaults") or {}
@@ -106,7 +119,7 @@ def clear_config_cache() -> None:
     _CONFIG_CACHE.clear()
 
 
-def update_managed_server(server_id: str, updates: dict[str, Any], path: str | Path = "config.yaml") -> None:
+def update_managed_server(server_id: str, updates: dict[str, Any], path: str | Path | None = None) -> None:
     """Update fields on a managed_server entry in config.yaml.
 
     Typical usage: update_managed_server("llamacpp-coding", {"context_window": 128000})
@@ -123,7 +136,7 @@ def update_managed_server(server_id: str, updates: dict[str, Any], path: str | P
     raise ValueError(f"Managed server '{server_id}' not found in config")
 
 
-def update_remote_server(server_id: str, updates: dict[str, Any], path: str | Path = "config.yaml") -> None:
+def update_remote_server(server_id: str, updates: dict[str, Any], path: str | Path | None = None) -> None:
     """Update fields on a remote_server entry in config.yaml."""
     config = load_unified_config(path)
     for i, server in enumerate(config.remote_servers):
@@ -137,7 +150,7 @@ def update_remote_server(server_id: str, updates: dict[str, Any], path: str | Pa
     raise ValueError(f"Remote server '{server_id}' not found in config")
 
 
-def delete_managed_server(server_id: str, path: str | Path = "config.yaml") -> None:
+def delete_managed_server(server_id: str, path: str | Path | None = None) -> None:
     """Remove a managed_server entry from config.yaml."""
     config = load_unified_config(path)
     before = len(config.managed_servers)
@@ -147,7 +160,7 @@ def delete_managed_server(server_id: str, path: str | Path = "config.yaml") -> N
     save_unified_config(config, path)
 
 
-def delete_remote_server(server_id: str, path: str | Path = "config.yaml") -> None:
+def delete_remote_server(server_id: str, path: str | Path | None = None) -> None:
     """Remove a remote_server entry from config.yaml."""
     config = load_unified_config(path)
     before = len(config.remote_servers)
@@ -157,7 +170,7 @@ def delete_remote_server(server_id: str, path: str | Path = "config.yaml") -> No
     save_unified_config(config, path)
 
 
-def add_managed_server(data: dict[str, Any], path: str | Path = "config.yaml") -> ManagedServer:
+def add_managed_server(data: dict[str, Any], path: str | Path | None = None) -> ManagedServer:
     """Add a new managed_server entry to config.yaml."""
     config = load_unified_config(path)
     if any(s.name == data.get("name") for s in config.managed_servers):
@@ -168,7 +181,7 @@ def add_managed_server(data: dict[str, Any], path: str | Path = "config.yaml") -
     return server
 
 
-def add_remote_server(data: dict[str, Any], path: str | Path = "config.yaml") -> RemoteServer:
+def add_remote_server(data: dict[str, Any], path: str | Path | None = None) -> RemoteServer:
     """Add a new remote_server entry to config.yaml."""
     config = load_unified_config(path)
     if any(s.name == data.get("name") for s in config.remote_servers):
@@ -179,7 +192,7 @@ def add_remote_server(data: dict[str, Any], path: str | Path = "config.yaml") ->
     return server
 
 
-def update_engine_defaults(engine: str, args: list[str], path: str | Path = "config.yaml") -> None:
+def update_engine_defaults(engine: str, args: list[str], path: str | Path | None = None) -> None:
     """Replace the default CLI args for an engine in config.yaml."""
     config = load_unified_config(path)
     config.engine_defaults[engine] = args
@@ -214,13 +227,13 @@ def _yaml_str_value(value: Any) -> str:
     return str(value)
 
 
-def save_unified_config(config: UnifiedConfig, path: str | Path = "config.yaml") -> None:
+def save_unified_config(config: UnifiedConfig, path: str | Path | None = None) -> None:
     """Save the unified config back to YAML with comments preserved.
 
     Uses a template-based writer instead of yaml.dump() so that human-edited
     comments and section headers are preserved across saves.
     """
-    config_path = Path(path)
+    config_path = Path(path or DEFAULT_CONFIG_PATH)
     if not config_path.is_absolute():
         config_path = Path(__file__).resolve().parents[2] / config_path
 
@@ -269,7 +282,7 @@ def save_unified_config(config: UnifiedConfig, path: str | Path = "config.yaml")
         lines.append(f"    port: {server.port}")
         if server.engine != "llama":
             lines.append(f'    engine: "{server.engine}"')
-        lines.append(f"    context_window: {server.context_window}")
+        lines.append(f"    context_window: {'null' if server.context_window is None else server.context_window}")
         lines.append(f"    parallel: {server.parallel}")
         if server.extra_args:
             lines.append("    extra_args:")

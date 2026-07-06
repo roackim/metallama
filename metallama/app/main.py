@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import signal
 import subprocess
 import time
@@ -15,10 +16,10 @@ from fastapi.staticfiles import StaticFiles
 from .auth import admin_guard, auth_enabled, check_password, create_session, revoke_session
 from .config import STATIC_DIR, Config
 from .hf_routes import router as hf_router
+from .logs import begin_capture, get_last_exit, log_file_path, mark_expected_stop, server_logs
 from .models import ProcessState
-from .ollama.config import load_config as load_ollama_config
 from .ollama.probe import probe_subservers
-from .ollama.registry import init_registry as init_ollama_registry
+from .ollama.registry import rebuild_registry as rebuild_ollama_registry
 from .ollama.routes.ollama import router as ollama_router
 from .ollama.routes.openai import router as openai_router
 from .profiles import MODEL_PROFILES
@@ -28,9 +29,11 @@ from .runtime import (
     build_command_preview,
     cleanup_dead,
     is_alive,
+    is_port_open,
     model_locks,
     model_payload,
     runtime_processes,
+    status_for,
 )
 
 app = FastAPI(title="metallama")
@@ -40,8 +43,7 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 # Ollama / OpenAI gateway (mounted at /ollama)
 # ---------------------------------------------------------------------------
 
-_ollama_cfg = load_ollama_config()
-init_ollama_registry(_ollama_cfg)
+rebuild_ollama_registry()
 app.include_router(ollama_router, prefix="/ollama")
 app.include_router(openai_router, prefix="/ollama")
 app.include_router(hf_router)
@@ -52,25 +54,9 @@ vram_history: deque[dict[str, Any]] = deque(maxlen=MAX_HISTORY_SAMPLES)
 ram_history: deque[dict[str, Any]] = deque(maxlen=MAX_HISTORY_SAMPLES)
 
 
-def server_profiles(service: str | None = None) -> dict[str, Any]:
-    return dict(MODEL_PROFILES)
-
-
-def servers_payload(service: str | None = None) -> list[dict[str, Any]]:
-    return [model_payload(profile) for profile in server_profiles(service).values()]
-
-
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(str(STATIC_DIR / "index.html"))
-
-
-@app.get("/api/config")
-def get_config() -> dict[str, str]:
-    return {
-        "EXECUTABLE_LLAMA": str(Config.EXECUTABLE_LLAMA),
-        "BASE_URL": str(Config.BASE_URL),
-    }
 
 
 @app.get("/api/health")
@@ -125,54 +111,25 @@ def auth_verify(authorization: str = Header("")) -> dict[str, Any]:
 
 @app.get("/api/system/vram")
 def get_vram_status() -> dict[str, Any]:
-    """Get current VRAM usage from nvidia-smi."""
-    try:
-        result = subprocess.run(
-            ["/usr/bin/nvidia-smi", "--query-gpu=memory.used,memory.total", "--format=csv,noheader,nounits"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode != 0:
-            return {"error": "nvidia-smi failed", "available": False}
-        
-        # Parse output: "used, total" (in MiB)
-        lines = result.stdout.strip().split("\n")
-        gpus = []
-        for line in lines:
-            if not line.strip():
-                continue
-            parts = line.split(",")
-            if len(parts) >= 2:
-                used_mb = float(parts[0].strip())
-                total_mb = float(parts[1].strip())
-                gpus.append({
-                    "used_gb": round(used_mb / 1024, 2),
-                    "total_gb": round(total_mb / 1024, 2),
-                    "used_mb": int(used_mb),
-                    "total_mb": int(total_mb),
-                    "percent": round((used_mb / total_mb * 100) if total_mb > 0 else 0, 1),
-                })
-        
-        # Store in history (aggregate across GPUs)
-        if gpus:
-            total_used = sum(gpu["used_gb"] for gpu in gpus)
-            total_max = sum(gpu["total_gb"] for gpu in gpus)
-            avg_percent = sum(gpu["percent"] for gpu in gpus) / len(gpus)
-            vram_history.append({
-                "timestamp": int(time.time() * 1000),
-                "percent": round(avg_percent, 1),
-                "used_gb": round(total_used, 2),
-                "total_gb": round(total_max, 2),
-            })
-        
-        return {"available": True, "gpus": gpus}
-    except FileNotFoundError:
-        return {"error": "nvidia-smi not found", "available": False}
-    except subprocess.TimeoutExpired:
-        return {"error": "nvidia-smi timeout", "available": False}
-    except Exception as exc:
-        return {"error": str(exc), "available": False}
+    """Get current VRAM usage (nvidia-smi, rocm-smi, or amd-smi)."""
+    from .gpu import vram_status
+
+    payload = vram_status()
+    gpus = payload.get("gpus") or []
+
+    # Store in history (aggregate across GPUs)
+    if gpus:
+        total_used = sum(gpu["used_gb"] for gpu in gpus)
+        total_max = sum(gpu["total_gb"] for gpu in gpus)
+        avg_percent = sum(gpu["percent"] for gpu in gpus) / len(gpus)
+        vram_history.append({
+            "timestamp": int(time.time() * 1000),
+            "percent": round(avg_percent, 1),
+            "used_gb": round(total_used, 2),
+            "total_gb": round(total_max, 2),
+        })
+
+    return payload
 
 
 @app.get("/api/system/ram")
@@ -217,6 +174,128 @@ def get_ram_history() -> dict[str, Any]:
     return {"history": list(ram_history)}
 
 
+@app.get("/api/ports/suggest")
+def suggest_port() -> dict[str, Any]:
+    """Suggest a free port: not taken by a configured server, not open on the OS."""
+    from .unified_config import load_unified_config
+
+    cfg = load_unified_config()
+    taken = {s.port for s in cfg.managed_servers}
+    port = 8080
+    while port in taken or is_port_open("127.0.0.1", port):
+        port += 1
+        if port > 65535:
+            raise HTTPException(status_code=500, detail="No free port found")
+    return {"port": port}
+
+
+@app.get("/api/library")
+def model_library() -> dict[str, Any]:
+    """Inventory of the models directory: downloaded GGUFs (with GGUF metadata
+    and which servers use them) and in-progress/partial downloads."""
+    import json as _json
+
+    from .gguf import read_metadata
+    from .unified_config import load_unified_config
+
+    models_dir = Config.MODELS_DIR
+    if not models_dir or not Path(models_dir).is_dir():
+        return {"models": [], "partials": [], "models_dir": models_dir}
+    models_path = Path(models_dir)
+
+    cfg = load_unified_config()
+    used_by: dict[str, list[str]] = {}
+    for server in cfg.managed_servers:
+        for p in (server.model_path, server.model_draft):
+            if p:
+                try:
+                    used_by.setdefault(str(Path(p).resolve()), []).append(server.name)
+                except OSError:
+                    pass
+
+    models = []
+    for p in sorted(models_path.rglob("*.gguf")):
+        try:
+            size = p.stat().st_size
+        except OSError:
+            continue
+        meta = read_metadata(p) or {}
+        models.append({
+            "name": p.stem,
+            "path": str(p),
+            "rel_path": str(p.relative_to(models_path)),
+            "size_bytes": size,
+            "size_gb": round(size / 1024**3, 1),
+            "arch": meta.get("general.architecture"),
+            "params": meta.get("general.size_label"),
+            "servers": used_by.get(str(p.resolve()), []),
+        })
+
+    partials = []
+    for p in sorted(models_path.rglob("*.partial")):
+        meta_path = p.with_name(p.name + ".meta")
+        total = completed = 0
+        repo_id = hf_filename = None
+        try:
+            if meta_path.exists():
+                raw = _json.loads(meta_path.read_text())
+                total = int(raw.get("total", 0))
+                block = int(raw.get("block_size", 1)) or 1
+                done = raw.get("done", [])
+                repo_id = raw.get("repo_id")
+                hf_filename = raw.get("filename")
+                n_blocks = (total + block - 1) // block if total else 0
+                completed = sum(
+                    min(total, (int(i) + 1) * block) - int(i) * block
+                    for i in done
+                    if int(i) < n_blocks
+                )
+            else:
+                completed = p.stat().st_size  # legacy contiguous partial
+        except (OSError, ValueError):
+            pass
+        partials.append({
+            "name": p.name.removesuffix(".partial").removesuffix(".gguf"),
+            "rel_path": str(p.relative_to(models_path)),
+            "total_bytes": total,
+            "completed_bytes": completed,
+            "percent": round(completed / total * 100, 1) if total else None,
+            "repo_id": repo_id,
+            "filename": hf_filename,
+        })
+
+    return {"models": models, "partials": partials, "models_dir": str(models_path)}
+
+
+@app.post("/api/library/partials/discard")
+def discard_partial(payload: dict[str, Any] = Body(...), _guard: None = Depends(admin_guard)) -> dict[str, Any]:
+    """Delete a .partial file (and its .meta sidecar) from the models dir."""
+    rel_path = payload.get("rel_path", "")
+    if not rel_path or not isinstance(rel_path, str):
+        raise HTTPException(status_code=400, detail="rel_path is required")
+    models_dir = Config.MODELS_DIR
+    if not models_dir:
+        raise HTTPException(status_code=400, detail="METALLAMA_MODELS_DIR is not set")
+
+    models_path = Path(models_dir).resolve()
+    target = (models_path / rel_path).resolve()
+    try:
+        os.path.commonpath([str(models_path), str(target)])
+    except ValueError:
+        raise HTTPException(status_code=400, detail="rel_path escapes the models directory")
+    if os.path.commonpath([str(models_path), str(target)]) != str(models_path):
+        raise HTTPException(status_code=400, detail="rel_path escapes the models directory")
+    if target.suffix != ".partial":
+        raise HTTPException(status_code=400, detail="rel_path must point to a .partial file")
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="Partial file not found")
+
+    target.unlink()
+    meta = target.with_name(target.name + ".meta")
+    meta.unlink(missing_ok=True)
+    return {"ok": True, "discarded": rel_path}
+
+
 @app.get("/api/model-files")
 def list_model_files() -> dict[str, Any]:
     """Scan METALLAMA_MODELS_DIR for .gguf files and return their paths."""
@@ -237,7 +316,7 @@ async def list_models() -> dict[str, Any]:
     from .ollama.schemas import SubserverConfig
     import httpx
 
-    managed = [model_payload(profile) for profile in MODEL_PROFILES.values()]
+    managed = await asyncio.gather(*[model_payload(profile) for profile in MODEL_PROFILES.values()])
     cfg = load_unified_config()
     remote = []
     async with httpx.AsyncClient(timeout=httpx.Timeout(2.0)) as client:
@@ -260,52 +339,6 @@ async def list_models() -> dict[str, Any]:
     return {"models": managed + remote}
 
 
-@app.get("/api/llm/servers")
-def list_llm_servers() -> dict[str, Any]:
-    return {"servers": servers_payload()}
-
-
-@app.get("/api/servers")
-def list_servers() -> dict[str, Any]:
-    return {"servers": servers_payload()}
-
-
-@app.get("/api/llm/servers/status")
-def list_llm_servers_status() -> dict[str, Any]:
-    return {
-        "servers": [
-            {"id": payload["id"], "status": payload["status"], "pid": payload["pid"], "url": payload["url"]}
-            for payload in servers_payload()
-        ]
-    }
-
-
-@app.get("/api/servers/status")
-def list_servers_status() -> dict[str, Any]:
-    return {
-        "servers": [
-            {"id": payload["id"], "status": payload["status"], "pid": payload["pid"], "url": payload["url"]}
-            for payload in servers_payload()
-        ]
-    }
-
-
-@app.get("/api/llm/servers/{server_id}/status")
-def llm_server_status(server_id: str) -> dict[str, Any]:
-    profile = server_profiles().get(server_id)
-    if not profile:
-        raise HTTPException(status_code=404, detail="Unknown server id")
-    return model_payload(profile)
-
-
-@app.get("/api/servers/{server_id}/status")
-def server_status(server_id: str) -> dict[str, Any]:
-    profile = server_profiles().get(server_id)
-    if not profile:
-        raise HTTPException(status_code=404, detail="Unknown server id")
-    return model_payload(profile)
-
-
 @app.post("/api/models/{model_name}/start")
 async def start_model(model_name: str, _guard: None = Depends(admin_guard)) -> dict[str, Any]:
     profile = MODEL_PROFILES.get(model_name)
@@ -319,16 +352,26 @@ async def start_model(model_name: str, _guard: None = Depends(admin_guard)) -> d
         if existing and is_alive(existing.process):
             raise HTTPException(status_code=409, detail="Already running")
 
+        if is_port_open("127.0.0.1", profile.port):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Port {profile.port} is already in use by another process",
+            )
+
         command = build_command(profile)
         try:
             proc = subprocess.Popen(
                 command,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 text=True,
+                errors="replace",
+                bufsize=1,
             )
         except FileNotFoundError as exc:
             raise HTTPException(status_code=400, detail=f"Binary not found: {command[0]}") from exc
+
+        begin_capture(model_name, proc)
 
         runtime_processes[model_name] = ProcessState(
             process=proc,
@@ -336,25 +379,7 @@ async def start_model(model_name: str, _guard: None = Depends(admin_guard)) -> d
             command=command,
         )
 
-    return {"ok": True, "model": model_payload(profile)}
-
-
-@app.post("/api/llm/servers/{server_id}/start")
-async def start_llm_server(server_id: str, _guard: None = Depends(admin_guard)) -> dict[str, Any]:
-    profile = server_profiles().get(server_id)
-    if not profile:
-        raise HTTPException(status_code=404, detail="Unknown server id")
-    result = await start_model(server_id)
-    return {"ok": result["ok"], "server": result["model"]}
-
-
-@app.post("/api/servers/{server_id}/start")
-async def start_server(server_id: str, _guard: None = Depends(admin_guard)) -> dict[str, Any]:
-    profile = server_profiles().get(server_id)
-    if not profile:
-        raise HTTPException(status_code=404, detail="Unknown server id")
-    result = await start_model(server_id)
-    return {"ok": result["ok"], "server": result["model"]}
+    return {"ok": True, "model": await model_payload(profile)}
 
 
 @app.post("/api/models/{model_name}/stop")
@@ -367,10 +392,11 @@ async def stop_model(model_name: str, _guard: None = Depends(admin_guard)) -> di
         cleanup_dead(model_name)
         state = runtime_processes.get(model_name)
         if not state:
-            return {"ok": True, "model": model_payload(profile)}
+            return {"ok": True, "model": await model_payload(profile)}
 
         proc = state.process
         if is_alive(proc):
+            mark_expected_stop(model_name)
             proc.terminate()
             for _ in range(20):
                 if not is_alive(proc):
@@ -381,25 +407,7 @@ async def stop_model(model_name: str, _guard: None = Depends(admin_guard)) -> di
 
         runtime_processes.pop(model_name, None)
 
-    return {"ok": True, "model": model_payload(profile)}
-
-
-@app.post("/api/llm/servers/{server_id}/stop")
-async def stop_llm_server(server_id: str, _guard: None = Depends(admin_guard)) -> dict[str, Any]:
-    profile = server_profiles().get(server_id)
-    if not profile:
-        raise HTTPException(status_code=404, detail="Unknown server id")
-    result = await stop_model(server_id)
-    return {"ok": result["ok"], "server": result["model"]}
-
-
-@app.post("/api/servers/{server_id}/stop")
-async def stop_server(server_id: str, _guard: None = Depends(admin_guard)) -> dict[str, Any]:
-    profile = server_profiles().get(server_id)
-    if not profile:
-        raise HTTPException(status_code=404, detail="Unknown server id")
-    result = await stop_model(server_id)
-    return {"ok": result["ok"], "server": result["model"]}
+    return {"ok": True, "model": await model_payload(profile)}
 
 
 @app.post("/api/models/create")
@@ -417,6 +425,7 @@ async def create_model(payload: dict[str, Any] = Body(...), _guard: None = Depen
             raise HTTPException(status_code=400, detail="model_path is required")
         server = add_managed_server(payload)
         reload_model_profiles()
+        rebuild_ollama_registry()
         return {"ok": True, "name": server.name}
     elif model_type == "remote":
         if not payload.get("name"):
@@ -444,6 +453,7 @@ async def delete_model(model_name: str, _guard: None = Depends(admin_guard)) -> 
                 raise HTTPException(status_code=409, detail="Stop the server before deleting")
         delete_managed_server(model_name)
         reload_model_profiles()
+        rebuild_ollama_registry()
         return {"ok": True, "deleted": model_name}
 
     # Try remote
@@ -456,11 +466,11 @@ async def delete_model(model_name: str, _guard: None = Depends(admin_guard)) -> 
 
 
 @app.get("/api/models/{model_name}/status")
-def model_status(model_name: str) -> dict[str, Any]:
+async def model_status(model_name: str) -> dict[str, Any]:
     profile = MODEL_PROFILES.get(model_name)
     if not profile:
         raise HTTPException(status_code=404, detail="Unknown model")
-    return model_payload(profile)
+    return await model_payload(profile)
 
 
 @app.get("/api/models/{model_name}/slots")
@@ -473,7 +483,6 @@ async def model_slots(model_name: str) -> Any:
     """
     import httpx
 
-    from .runtime import status_for
     from .unified_config import load_unified_config
 
     # Resolve the upstream /slots URL
@@ -481,7 +490,7 @@ async def model_slots(model_name: str) -> Any:
 
     profile = MODEL_PROFILES.get(model_name)
     if profile:
-        if status_for(profile) != "online":
+        if await status_for(profile) != "online":
             raise HTTPException(status_code=503, detail="Server not online")
         slots_url = f"http://127.0.0.1:{profile.port}/slots"
     else:
@@ -525,6 +534,34 @@ async def model_slots(model_name: str) -> Any:
     return {"slots": slots}
 
 
+@app.get("/api/models/{model_name}/logs")
+def model_logs(model_name: str, since: int = 0, tail: int = 0) -> dict[str, Any]:
+    """Return captured llama-server output for a managed server.
+
+    - `since=<seq>`: incremental polling — only lines with seq > since.
+    - `tail=<n>`: just the last n lines (overrides since).
+    """
+    if model_name not in MODEL_PROFILES:
+        raise HTTPException(status_code=404, detail="Unknown model")
+
+    log = server_logs.get(model_name)
+    if log is None:
+        lines: list[tuple[int, str]] = []
+    elif tail > 0:
+        lines = log.tail(tail)
+    else:
+        lines = log.since(since)
+
+    state = runtime_processes.get(model_name)
+    return {
+        "lines": [{"seq": s, "text": t} for s, t in lines],
+        "next": lines[-1][0] if lines else since,
+        "running": bool(state and is_alive(state.process)),
+        "last_exit": get_last_exit(model_name),
+        "log_file": str(log_file_path(model_name)),
+    }
+
+
 @app.on_event("startup")
 async def probe_ollama_subservers() -> None:
     await probe_subservers()
@@ -535,6 +572,7 @@ def stop_all_on_shutdown() -> None:
     for model_id, state in list(runtime_processes.items()):
         proc = state.process
         if is_alive(proc):
+            mark_expected_stop(model_id)
             proc.send_signal(signal.SIGTERM)
         runtime_processes.pop(model_id, None)
 
@@ -626,6 +664,7 @@ async def update_model_config(model_name: str, payload: dict[str, Any] = Body(..
         update_managed_server(model_name, updates)
         # Reload profiles from disk so changes take effect immediately
         reload_model_profiles()
+        rebuild_ollama_registry()
     
     # Return updated config from unified config
     unified = load_unified_config()
@@ -663,6 +702,7 @@ async def update_remote_server_config(server_name: str, payload: dict[str, Any] 
 
     if updates:
         update_remote_server(server_name, updates)
+        rebuild_ollama_registry()
 
     unified = load_unified_config()
     entry = next((s for s in unified.remote_servers if s.name == (updates.get("name") or server_name)), None)

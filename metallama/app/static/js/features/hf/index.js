@@ -1,13 +1,16 @@
 import { api } from "../../core/api.js";
 import { setConfigMessage } from "../../core/uiMessage.js";
+import { openCreateForModel } from "../models/index.js";
+import { refreshLibrary } from "../library/index.js";
 
 const PANEL_ID = "hf-panel";
 const SEARCH_ID = "hf-search";
 const RESULTS_ID = "hf-results";
 
 let searchTimeout = null;
-let activeDownloads = new Map(); // filename → { total, completed }
+let activeDownloads = new Map(); // downloadId → AbortController
 let currentRepoFiles = null;
+let vramTotalBytes = null; // total VRAM across GPUs, for fit badges
 
 // ── Public API ─────────────────────────────────────────────
 
@@ -39,6 +42,19 @@ export function setupHfSearch() {
       const inp = document.getElementById(SEARCH_ID);
       if (inp) inp.value = "";
       hideResults();
+    }
+  });
+
+  // Let the library panel resume interrupted downloads
+  window.__metallamaResumeDownload = (repoId, filenames, label) =>
+    startDownload(repoId, filenames, null, label);
+
+  // Closing the tab kills in-progress downloads (partials are kept and
+  // resumable, but the user should know).
+  window.addEventListener("beforeunload", (e) => {
+    if (activeDownloads.size > 0) {
+      e.preventDefault();
+      e.returnValue = "A model download is in progress — closing will interrupt it.";
     }
   });
 }
@@ -104,6 +120,14 @@ function bindResultClicks(container) {
 async function loadFiles(repoId, container) {
   container.innerHTML = `<div class="hf-loading">Loading files…</div>`;
   const [ns, repo] = repoId.split("/");
+  if (vramTotalBytes === null) {
+    try {
+      const vram = await api("/api/system/vram");
+      vramTotalBytes = (vram.gpus || []).reduce((sum, g) => sum + g.total_mb * 1024 * 1024, 0) || 0;
+    } catch {
+      vramTotalBytes = 0; // unknown — no badges
+    }
+  }
   try {
     const data = await api(`/api/hf/models/${ns}/${repo}/files`);
     const files = data.files || [];
@@ -134,12 +158,19 @@ function renderFile(file, repoId) {
 
   const quantClass = quantColor(quant);
 
+  // Weights alone already exceeding total VRAM means it can never fully offload
+  const noFit = vramTotalBytes > 0 && file.size > 0 && file.size * 1.05 > vramTotalBytes;
+  const fitBadge = noFit
+    ? `<span class="hf-fit-badge" title="Weights (${size}) exceed total VRAM (${formatBytes(vramTotalBytes)}) — would run partially on CPU">&gt; VRAM</span>`
+    : "";
+
   return `
     <div class="hf-file" data-download-id="${escapeHtml(downloadId)}" data-filenames='${JSON.stringify(filenames)}'>
       <div class="hf-file-info">
         <span class="hf-file-name">${escapeHtml(name)}</span>
         <span class="hf-quant-badge ${quantClass}">${escapeHtml(quant)}</span>
         <span class="hf-file-size">${size}</span>
+        ${fitBadge}
       </div>
       <div class="hf-file-actions">
         <button class="btn-primary btn-small hf-download-btn admin-only" data-repo-id="${escapeHtml(repoId)}">Download</button>
@@ -181,6 +212,7 @@ function getOrCreateDownloadBar(downloadId) {
       <div class="hf-dl-fill" style="width: 0%"></div>
     </div>
     <span class="hf-dl-text">0%</span>
+    <button class="hf-dl-cancel" type="button" title="Cancel download (partial file is kept)">✕</button>
   `;
   downloads.appendChild(bar);
   return bar;
@@ -192,15 +224,30 @@ async function startDownload(repoId, filenames, btn, label) {
   const dlLabel = bar.querySelector(".hf-dl-label");
   const dlFill = bar.querySelector(".hf-dl-fill");
   const dlText = bar.querySelector(".hf-dl-text");
+  const cancelBtn = bar.querySelector(".hf-dl-cancel");
 
   dlLabel.textContent = label;
   dlFill.style.width = "0%";
   dlFill.className = "hf-dl-fill";
   dlText.textContent = "0%";
 
+  const controller = new AbortController();
+  activeDownloads.set(downloadId, controller);
+  if (cancelBtn) {
+    cancelBtn.classList.remove("is-hidden");
+    cancelBtn.onclick = () => controller.abort();
+  }
+
   // Track per-file progress
   const fileProgress = {};
   filenames.forEach((f) => (fileProgress[f] = { total: 0, completed: 0 }));
+  let downloadedPath = null; // absolute path of the first completed file
+
+  // Rolling transfer speed (EMA over ≥500ms windows). The first progress
+  // message seeds the baseline so resumed downloads don't spike the rate.
+  let speedT = 0;
+  let speedBytes = 0;
+  let speedRate = 0;
 
   try {
     const resp = await fetch("/api/hf/download", {
@@ -210,6 +257,7 @@ async function startDownload(repoId, filenames, btn, label) {
         ...((sessionStorage.getItem("metallama_admin_token") && { "Authorization": `Bearer ${sessionStorage.getItem("metallama_admin_token")}` }) || {}),
       },
       body: JSON.stringify({ repo_id: repoId, filenames }),
+      signal: controller.signal,
     });
 
     if (!resp.ok) {
@@ -238,6 +286,7 @@ async function startDownload(repoId, filenames, btn, label) {
           fileProgress[fname] = { total: msg.total, completed: msg.completed };
         } else if (msg.status === "done") {
           fileProgress[fname] = { total: msg.size, completed: msg.size };
+          if (!downloadedPath && msg.path) downloadedPath = msg.path;
         } else if (msg.status === "error") {
           throw new Error(msg.error || "Download error");
         }
@@ -248,19 +297,44 @@ async function startDownload(repoId, filenames, btn, label) {
           totalCompleted += fileProgress[f].completed;
           totalSize += fileProgress[f].total;
         }
+        const now = performance.now();
+        if (speedT === 0) {
+          speedT = now;
+          speedBytes = totalCompleted;
+        } else if (now - speedT >= 500) {
+          const instant = ((totalCompleted - speedBytes) * 1000) / (now - speedT);
+          speedRate = speedRate ? speedRate * 0.6 + instant * 0.4 : instant;
+          speedT = now;
+          speedBytes = totalCompleted;
+        }
+
         const pct = totalSize > 0 ? Math.round((totalCompleted / totalSize) * 100) : 0;
         dlFill.style.width = `${pct}%`;
-        dlText.textContent = `${pct}% — ${formatBytes(totalCompleted)} / ${formatBytes(totalSize)}`;
+        const speedTxt = speedRate > 0 ? ` — ${formatBytes(speedRate)}/s` : "";
+        dlText.textContent = `${pct}% — ${formatBytes(totalCompleted)} / ${formatBytes(totalSize)}${speedTxt}`;
       }
     }
 
     dlFill.style.width = "100%";
     dlFill.classList.add("done");
     dlText.textContent = "✓ Done";
-    btn.textContent = "Done";
-    btn.classList.remove("btn-secondary");
-    btn.classList.add("btn-primary");
     setConfigMessage(`Downloaded: ${filenames.length === 1 ? filenames[0].split("/").pop() : filenames.length + " files"}`);
+
+    invalidateModelFilesCache();
+
+    // Swap the Download button for a Create Server shortcut
+    // (cloneNode drops the download click listener)
+    if (btn) {
+      const createBtn = btn.cloneNode(true);
+      btn.replaceWith(createBtn);
+      createBtn.disabled = false;
+      createBtn.textContent = "+ Create Server";
+      createBtn.title = "Create a server for the downloaded model";
+      createBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openCreateForModel(downloadedPath || "");
+      });
+    }
 
     // Fade out the download bar after 5s
     setTimeout(() => {
@@ -273,14 +347,21 @@ async function startDownload(repoId, filenames, btn, label) {
         }
       }, 600);
     }, 5000);
-
-    invalidateModelFilesCache();
   } catch (err) {
     dlFill.classList.add("error");
-    dlText.textContent = `Error: ${err.message}`;
-    btn.textContent = "Retry";
-    btn.disabled = false;
-    setConfigMessage(err.message, true);
+    if (err.name === "AbortError") {
+      dlText.textContent = "Cancelled — partial file kept";
+      if (btn) { btn.textContent = "Resume"; btn.disabled = false; }
+      setConfigMessage("Download cancelled — Resume continues from the partial file");
+    } else {
+      dlText.textContent = `Error: ${err.message}`;
+      if (btn) { btn.textContent = "Retry"; btn.disabled = false; }
+      setConfigMessage(err.message, true);
+    }
+  } finally {
+    activeDownloads.delete(downloadId);
+    if (cancelBtn) cancelBtn.classList.add("is-hidden");
+    refreshLibrary().catch(() => {});
   }
 }
 

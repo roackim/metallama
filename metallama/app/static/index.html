@@ -3,21 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Metallama &mdash; HYGEOS</title>
+    <title>Metallama</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
-    <header class="banner">
-      <img class="banner-img" src="/static/assets/hygeos-banner.png" alt="Hygeos banner" />
-    </header>
-
     <header class="page-header">
       <div class="header-container">
         <div class="header-content">
-          <img id="hero-logo" class="header-logo" src="/static/assets/logo-carre-noir.svg" alt="Hygeos logo" />
+          <span class="header-logo-glyph" aria-hidden="true">🦙</span>
           <div class="header-text">
-            <h1 class="hero-title">Meta-llama</h1>
-            <p class="subtitle">Manage AI models and llamacpp instances</p>
+            <h1 class="hero-title">Metallama</h1>
+            <p class="subtitle">Manage models and llama.cpp instances</p>
           </div>
         </div>
         <div class="header-controls">
@@ -40,43 +36,73 @@
       </div>
     </header>
 
-    <main class="container">
-      <!-- <section class="info-banner">
-        <div class="info-banner-row">
-          <div class="info-banner-block">
-            <span class="info-banner-label">Use LLMs in vscode:</span>
-            <span class="info-banner-label">click model > Manage Language Models > + Add Models > "Ollama" > </span>
-            <code class="info-banner-url">http://gpu4.hygeos.com:8010/ollama</code>
-          </div>
-      </section> -->
-      <section>
+    <main class="container layout-grid">
+      <section class="main-col">
         <div id="binary-warning" class="binary-warning is-hidden"></div>
         <p id="ui-message" class="ui-message"></p>
 
-        <!-- Hugging Face model search -->
-        <div id="hf-panel" class="hf-panel">
-          <div id="hf-downloads" class="hf-downloads is-hidden"></div>
-          <div class="hf-search-wrap">
-            <svg class="hf-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <input type="text" id="hf-search" placeholder="Search Hugging Face for GGUF models…" autocomplete="off" spellcheck="false" />
+        <section class="main-panel">
+          <h2 class="side-title">Find Models</h2>
+          <div id="hf-panel" class="hf-panel">
+            <div id="hf-downloads" class="hf-downloads is-hidden"></div>
+            <div class="hf-search-wrap">
+              <svg class="hf-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input type="text" id="hf-search" placeholder="Search Hugging Face for GGUF models…" autocomplete="off" spellcheck="false" />
+            </div>
+            <div id="hf-results" class="hf-results is-hidden"></div>
           </div>
-        <div id="hf-results" class="hf-results is-hidden"></div>
-        </div>
-        
-        <div><br></div>
-        <hr class="section-separator" />
+        </section>
 
-        <div class="models-header">
-          <button id="defaults-btn" class="btn-secondary btn-small admin-only" title="Edit default engine params">⚙ Defaults</button>
-          <button id="add-model-btn" class="btn-secondary btn-small admin-only" title="Add a new server">+ Add Server</button>
-        </div>
-        <div id="models" class="models-list"></div>
-        <div class="summary-container">
-          <p id="summary" class="summary"></p>
-        </div>
+        <section class="main-panel">
+          <div class="panel-head">
+            <div class="panel-head-left">
+              <h2 class="side-title">Servers</h2>
+              <span id="summary" class="summary-chip"></span>
+            </div>
+            <div class="panel-head-right">
+              <input type="text" id="server-filter" class="server-filter" placeholder="Filter by name…" autocomplete="off" spellcheck="false" />
+              <div class="status-filter" role="group" aria-label="Filter by status">
+                <button class="chip-btn active" type="button" data-status="all">All</button>
+                <button class="chip-btn" type="button" data-status="running">Running</button>
+                <button class="chip-btn" type="button" data-status="offline">Offline</button>
+              </div>
+              <button id="connect-btn" class="btn-secondary" title="Connect editors and agents to your models">🔌 Connect</button>
+              <button id="defaults-btn" class="btn-secondary admin-only" title="Edit default engine params">⚙ Defaults</button>
+              <button id="add-model-btn" class="btn-primary admin-only" title="Add a new server">+ Add Server</button>
+            </div>
+          </div>
+          <div id="models" class="models-list"></div>
+          <p id="models-filter-empty" class="library-empty is-hidden">No servers match the current filter.</p>
+        </section>
       </section>
 
-      </section>
+      <aside class="side-col" id="library-panel">
+        <section class="side-panel">
+          <h2 class="side-title">System</h2>
+          <div class="system-metric">
+            <div class="system-metric-head">
+              <span class="system-metric-name">RAM</span>
+              <span id="ram-status" class="system-metric-value">--</span>
+            </div>
+            <canvas id="ram-graph" class="system-graph" width="400" height="60"></canvas>
+          </div>
+          <div class="system-metric">
+            <div class="system-metric-head">
+              <span class="system-metric-name">VRAM</span>
+              <span id="vram-status" class="system-metric-value">--</span>
+            </div>
+            <canvas id="vram-graph" class="system-graph" width="400" height="60"></canvas>
+          </div>
+        </section>
+
+        <section class="side-panel">
+          <h2 class="side-title">Model Library</h2>
+          <div id="library-downloading" class="library-downloading is-hidden"></div>
+          <h3 id="library-list-title" class="side-subtitle is-hidden">Downloaded models</h3>
+          <div id="library-list" class="library-list"></div>
+          <p id="library-empty" class="library-empty is-hidden">No models downloaded yet — search HuggingFace to get started.</p>
+        </section>
+      </aside>
     </main>
 
     <!-- Edit Config Modal -->
@@ -167,6 +193,63 @@
       </div>
     </div>
 
+    <!-- Connect Modal -->
+    <div id="connect-modal" class="modal-overlay is-hidden">
+      <div class="modal-dialog" style="max-width: 640px;">
+        <div class="modal-header">
+          <h2>Connect your tools</h2>
+          <button class="modal-close" data-action="connect-close" title="Close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="connect-model">Model</label>
+            <select id="connect-model"></select>
+          </div>
+
+          <div class="connect-section">
+            <div class="connect-section-head">
+              <h3>VS Code — Copilot Chat (Ollama provider)</h3>
+            </div>
+            <p class="connect-hint">Chat sidebar → model picker → <em>Manage Language Models…</em> → <em>Ollama</em>, then set the URL:</p>
+            <div class="snippet-row">
+              <code class="snippet" id="connect-ollama-url"></code>
+              <button class="btn-secondary btn-small" data-copy="connect-ollama-url">Copy</button>
+            </div>
+          </div>
+
+          <div class="connect-section">
+            <div class="connect-section-head">
+              <h3>Qwen Code / OpenAI-compatible CLIs</h3>
+            </div>
+            <div class="snippet-row">
+              <pre class="snippet" id="connect-env"></pre>
+              <button class="btn-secondary btn-small" data-copy="connect-env">Copy</button>
+            </div>
+          </div>
+
+          <div class="connect-section">
+            <div class="connect-section-head">
+              <h3>Cline / Continue / any OpenAI-compatible client</h3>
+            </div>
+            <div class="snippet-row">
+              <pre class="snippet" id="connect-openai"></pre>
+              <button class="btn-secondary btn-small" data-copy="connect-openai">Copy</button>
+            </div>
+          </div>
+
+          <div class="connect-section">
+            <div class="connect-section-head">
+              <h3>curl</h3>
+            </div>
+            <div class="snippet-row">
+              <pre class="snippet" id="connect-curl"></pre>
+              <button class="btn-secondary btn-small" data-copy="connect-curl">Copy</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Login Modal -->
     <div id="login-modal" class="modal-overlay is-hidden">
       <div class="modal-dialog" style="max-width: 360px;">
@@ -188,31 +271,6 @@
       </div>
     </div>
 
-    <footer class="app-footer">
-      <div class="footer-content">
-        <div class="vram-container">
-          <span id="ram-status" class="ram-status">RAM: --</span>
-          <div class="ram-graph-wrapper">
-            <canvas id="ram-graph" class="ram-graph" width="400" height="60"></canvas>
-            <div class="ram-labels">
-              <span class="ram-label">100%</span>
-              <span class="ram-label">50%</span>
-              <span class="ram-label">0%</span>
-            </div>
-          </div>
-          <span id="vram-status" class="vram-status">VRAM: --</span>
-          <div class="vram-graph-wrapper">
-            <canvas id="vram-graph" class="vram-graph" width="400" height="60"></canvas>
-            <div class="vram-labels">
-              <span class="vram-label">100%</span>
-              <span class="vram-label">50%</span>
-              <span class="vram-label">0%</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </footer>
-    
     <script type="module" src="/static/js/main.js"></script>
   </body>
 </html>

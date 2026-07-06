@@ -82,7 +82,7 @@ export async function refreshVram() {
   try {
     const data = await api("/api/system/vram");
     if (!data.available || !data.gpus || data.gpus.length === 0) {
-      vramStatusEl.textContent = "VRAM: N/A";
+      vramStatusEl.textContent = "N/A";
       return;
     }
 
@@ -90,9 +90,9 @@ export async function refreshVram() {
     const totalMax = data.gpus.reduce((sum, gpu) => sum + gpu.total_gb, 0);
     const avgPercent = data.gpus.reduce((sum, gpu) => sum + gpu.percent, 0) / data.gpus.length;
 
-    vramStatusEl.textContent = `VRAM: ${totalUsed.toFixed(1)} GB / ${totalMax.toFixed(1)} GB (${avgPercent.toFixed(0)}%)`;
+    vramStatusEl.textContent = `${totalUsed.toFixed(1)} / ${totalMax.toFixed(1)} GB · ${avgPercent.toFixed(0)}%`;
   } catch {
-    vramStatusEl.textContent = "VRAM: --";
+    vramStatusEl.textContent = "--";
   }
 }
 
@@ -104,13 +104,13 @@ export async function refreshRam() {
   try {
     const data = await api("/api/system/ram");
     if (!data.available) {
-      ramStatusEl.textContent = "RAM: N/A";
+      ramStatusEl.textContent = "N/A";
       return;
     }
 
-    ramStatusEl.textContent = `RAM: ${data.used_gb.toFixed(1)} GB / ${data.total_gb.toFixed(1)} GB (${data.percent.toFixed(0)}%)`;
+    ramStatusEl.textContent = `${data.used_gb.toFixed(1)} / ${data.total_gb.toFixed(1)} GB · ${data.percent.toFixed(0)}%`;
   } catch {
-    ramStatusEl.textContent = "RAM: --";
+    ramStatusEl.textContent = "--";
   }
 }
 

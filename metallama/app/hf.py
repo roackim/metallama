@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import os
 import re
+import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 from .config import Config
 
@@ -102,6 +107,7 @@ async def list_gguf_files(repo_id: str) -> list[dict[str, Any]]:
             "size_human": _human_size(entry.get("size", 0)),
             "quant": _parse_quant(path),
             "shard": _parse_shard(path),
+            "oid": entry.get("oid"),  # Git blob SHA for post-download verification
         })
 
     # Group shards: if any file is a shard, collect shard groups
@@ -143,7 +149,177 @@ def _split_repo(repo_id: str) -> tuple[str, str]:
 
 
 # ── Download ───────────────────────────────────────────────────────────────
+#
+# HF's CDN throttles per connection (~10 MB/s), so files are downloaded as
+# fixed-size blocks fetched over several parallel range requests (same idea
+# as hf_transfer/aria2). Completed blocks are tracked in a .partial.meta
+# sidecar so cancelled downloads resume without refetching.
 
+_DL_CONNECTIONS = max(1, int(os.getenv("METALLAMA_DL_CONNECTIONS", "6")))
+_DL_BLOCK_SIZE = 32 * 1024 * 1024  # 32MB
+
+
+def _load_block_meta(meta_path: Path, total: int) -> set[int]:
+    try:
+        raw = json.loads(meta_path.read_text())
+        if raw.get("block_size") == _DL_BLOCK_SIZE and raw.get("total") == total:
+            return {int(i) for i in raw.get("done", [])}
+    except (OSError, ValueError):
+        pass
+    return set()
+
+
+def _save_block_meta(
+    meta_path: Path, total: int, done: set[int], source: dict[str, str] | None = None
+) -> None:
+    try:
+        payload: dict = {"block_size": _DL_BLOCK_SIZE, "total": total, "done": sorted(done)}
+        if source:
+            payload.update(source)
+        meta_path.write_text(json.dumps(payload))
+    except OSError:
+        pass
+
+
+async def _probe(client: httpx.AsyncClient, url: str) -> tuple[int, bool]:
+    """Return (total_size, supports_range) for *url*."""
+    resp = await client.get(url, headers={"Range": "bytes=0-0"})
+    if resp.status_code == 206:
+        content_range = resp.headers.get("content-range", "")  # "bytes 0-0/12345"
+        total = int(content_range.rsplit("/", 1)[-1]) if "/" in content_range else 0
+        return total, total > 0
+    if resp.status_code == 200:
+        return int(resp.headers.get("content-length", 0)), False
+    raise RuntimeError(f"HTTP {resp.status_code}")
+
+
+async def _single_stream(
+    client: httpx.AsyncClient,
+    url: str,
+    filename: str,
+    partial_path: Path,
+    final_path: Path,
+):
+    """Fallback sequential download (server without range support)."""
+    async with client.stream("GET", url) as resp:
+        if resp.status_code != 200:
+            yield {"status": "error", "filename": filename, "error": f"HTTP {resp.status_code}"}
+            return
+        total = int(resp.headers.get("content-length", 0))
+        completed = 0
+        yield {"status": "downloading", "filename": filename, "total": total, "completed": 0}
+        last_progress = 0.0
+        with open(partial_path, "wb") as f:
+            async for chunk in resp.aiter_bytes(chunk_size=1 << 20):
+                f.write(chunk)
+                completed += len(chunk)
+                now = time.monotonic()
+                if now - last_progress >= 0.5:
+                    last_progress = now
+                    yield {"status": "downloading", "filename": filename, "total": total, "completed": completed}
+
+    partial_path.rename(final_path)
+    yield {"status": "done", "filename": filename, "path": str(final_path), "size": final_path.stat().st_size}
+
+
+async def _parallel_stream(
+    client: httpx.AsyncClient,
+    url: str,
+    filename: str,
+    partial_path: Path,
+    meta_path: Path,
+    final_path: Path,
+    total: int,
+    source: dict[str, str] | None = None,
+):
+    """Download *url* as parallel 32MB range requests into a preallocated file."""
+    from collections import deque
+
+    n_blocks = (total + _DL_BLOCK_SIZE - 1) // _DL_BLOCK_SIZE
+    done = _load_block_meta(meta_path, total)
+    if not done and partial_path.exists() and not meta_path.exists():
+        # Contiguous partial left by the old sequential downloader: fully
+        # downloaded blocks can be kept. A partial already at full size
+        # without meta is ambiguous (sparse?) — redownload it.
+        size = partial_path.stat().st_size
+        if size < total:
+            done = {i for i in range(n_blocks) if (i + 1) * _DL_BLOCK_SIZE <= size}
+    done = {i for i in done if i < n_blocks}
+
+    def block_len(idx: int) -> int:
+        return min(total, (idx + 1) * _DL_BLOCK_SIZE) - idx * _DL_BLOCK_SIZE
+
+    pending = deque(i for i in range(n_blocks) if i not in done)
+    state = {"completed": sum(block_len(i) for i in done)}
+
+    fd = os.open(partial_path, os.O_RDWR | os.O_CREAT, 0o644)
+    failed_error: str | None = None
+    task: asyncio.Task | None = None
+    try:
+        os.ftruncate(fd, total)
+
+        async def worker() -> None:
+            while True:
+                try:
+                    idx = pending.popleft()
+                except IndexError:
+                    return
+                start = idx * _DL_BLOCK_SIZE
+                end = min(total, start + _DL_BLOCK_SIZE) - 1
+                for attempt in (1, 2):
+                    got = 0
+                    try:
+                        async with client.stream(
+                            "GET", url, headers={"Range": f"bytes={start}-{end}"}
+                        ) as resp:
+                            if resp.status_code != 206:
+                                raise RuntimeError(f"HTTP {resp.status_code} for range request")
+                            offset = start
+                            async for chunk in resp.aiter_bytes(chunk_size=1 << 20):
+                                os.pwrite(fd, chunk, offset)
+                                offset += len(chunk)
+                                got += len(chunk)
+                                state["completed"] += len(chunk)
+                        if got != end - start + 1:
+                            raise RuntimeError(f"short read on block {idx}")
+                        done.add(idx)
+                        _save_block_meta(meta_path, total, done, source)
+                        break
+                    except asyncio.CancelledError:
+                        state["completed"] -= got
+                        raise
+                    except Exception:
+                        state["completed"] -= got
+                        if attempt == 2:
+                            raise
+
+        n_workers = min(_DL_CONNECTIONS, max(1, len(pending)))
+        task = asyncio.ensure_future(asyncio.gather(*(worker() for _ in range(n_workers))))
+
+        yield {"status": "downloading", "filename": filename, "total": total, "completed": state["completed"]}
+        try:
+            while not task.done():
+                await asyncio.sleep(0.4)
+                yield {"status": "downloading", "filename": filename, "total": total, "completed": state["completed"]}
+            await task
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            failed_error = str(exc)
+    finally:
+        if task is not None:
+            task.cancel()
+            try:
+                await task  # always retrieve the (Cancelled)Error
+            except BaseException:
+                pass
+        os.close(fd)
+        if len(done) < n_blocks:
+            _save_block_meta(meta_path, total, done, source)
+
+    if failed_error:
+        yield {"status": "error", "filename": filename, "error": failed_error}
+        return
 
 async def download_model(
     repo_id: str,
@@ -170,68 +346,32 @@ async def download_model(
         dest = models_dir
     dest.mkdir(parents=True, exist_ok=True)
 
-    for filename in filenames:
-        url = f"{_HF_RESOLVE}/{ns}/{name}/resolve/main/{quote(filename)}"
-        final_path = dest / filename
-        partial_path = dest / f"{filename}.partial"
+    limits = httpx.Limits(max_connections=_DL_CONNECTIONS + 2)
+    try:
+        async with httpx.AsyncClient(
+            timeout=_DOWNLOAD_TIMEOUT, follow_redirects=True, limits=limits
+        ) as client:
+            for filename in filenames:
+                url = f"{_HF_RESOLVE}/{ns}/{name}/resolve/main/{quote(filename)}"
+                final_path = dest / filename
+                partial_path = dest / f"{filename}.partial"
+                meta_path = dest / f"{filename}.partial.meta"
 
-        # Resume: start from existing partial size
-        existing_size = partial_path.stat().st_size if partial_path.exists() else 0
+                total, supports_range = await _probe(client, url)
+                if supports_range and total > _DL_BLOCK_SIZE:
+                    stream = _parallel_stream(
+                        client, url, filename, partial_path, meta_path, final_path, total,
+                        source={"repo_id": repo_id, "filename": filename},
+                    )
+                else:
+                    stream = _single_stream(client, url, filename, partial_path, final_path)
 
-        headers: dict[str, str] = {}
-        if existing_size > 0:
-            headers["Range"] = f"bytes={existing_size}-"
-
-        try:
-            async with httpx.AsyncClient(
-                timeout=_DOWNLOAD_TIMEOUT, follow_redirects=True
-            ) as client:
-                async with client.stream("GET", url, headers=headers) as resp:
-                    if resp.status_code not in (200, 206):
-                        yield {
-                            "status": "error",
-                            "filename": filename,
-                            "error": f"HTTP {resp.status_code}",
-                        }
-                        continue
-
-                    # Total size
-                    content_length = int(resp.headers.get("content-length", 0))
-                    if resp.status_code == 206:
-                        total = existing_size + content_length
-                    else:
-                        total = content_length
-                        existing_size = 0  # server doesn't support range
-
-                    completed = existing_size
-                    yield {
-                        "status": "downloading",
-                        "filename": filename,
-                        "total": total,
-                        "completed": completed,
-                    }
-
-                    mode = "ab" if resp.status_code == 206 else "wb"
-                    with open(partial_path, mode) as f:
-                        async for chunk in resp.aiter_bytes(chunk_size=1 << 18):  # 256KB
-                            f.write(chunk)
-                            completed += len(chunk)
-                            yield {
-                                "status": "downloading",
-                                "filename": filename,
-                                "total": total,
-                                "completed": completed,
-                            }
-
-            # Rename partial → final
-            partial_path.rename(final_path)
-            yield {
-                "status": "done",
-                "filename": filename,
-                "path": str(final_path),
-                "size": final_path.stat().st_size,
-            }
-
-        except Exception as exc:
-            yield {"status": "error", "filename": filename, "error": str(exc)}
-            return
+                had_error = False
+                async for msg in stream:
+                    if msg.get("status") == "error":
+                        had_error = True
+                    yield msg
+                if had_error:
+                    return
+    except Exception as exc:
+        yield {"status": "error", "error": str(exc)}

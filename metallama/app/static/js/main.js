@@ -3,6 +3,8 @@ import { setConfigMessage } from "./core/uiMessage.js";
 import { checkAuthEnabled, isAdmin, login, logout, onAdminChange, verifyToken } from "./core/auth.js";
 import { setupModels, refreshModels } from "./features/models/index.js";
 import { setupHfSearch } from "./features/hf/index.js";
+import { setupLibrary } from "./features/library/index.js";
+import { setupConnect } from "./features/connect/index.js";
 import { refreshRam, refreshRamGraph, refreshVram, refreshVramGraph } from "./features/system/index.js";
 import { setupThemeSwitcher } from "./features/theme/index.js";
 
@@ -40,12 +42,16 @@ async function init() {
 
   setupModels();
   setupHfSearch();
+  setupLibrary();
+  setupConnect();
 
   // Auth: check if enabled, wire up admin toggle
-  await checkAuthEnabled();
+  const authEnabled = await checkAuthEnabled();
   await verifyToken();
   const toggleBtn = document.getElementById("admin-toggle");
   const toggleLabel = document.getElementById("admin-toggle-label");
+  // No password configured — everyone is admin, the button is noise
+  if (!authEnabled) toggleBtn?.classList.add("is-hidden");
 
   function updateAdminUI(admin) {
     document.body.classList.toggle("is-admin", admin);

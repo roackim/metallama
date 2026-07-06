@@ -25,15 +25,30 @@ class AppConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 class OllamaChatMessage(BaseModel):
+    """Chat message — keeps tool-calling fields so agents work through the gateway."""
+
     role: str
-    content: str
+    content: str = ""
+    tool_calls: Optional[list[dict[str, Any]]] = None
+    tool_call_id: Optional[str] = None
+    tool_name: Optional[str] = None
+    images: Optional[list[str]] = None
+
+    class Config:
+        extra = "allow"
 
 
 class OllamaChatRequest(BaseModel):
     model: str
     messages: list[OllamaChatMessage]
     stream: bool = True
+    tools: Optional[list[dict[str, Any]]] = None
+    format: Optional[Any] = None
+    keep_alive: Optional[Any] = None
     options: Optional[dict[str, Any]] = None
+
+    class Config:
+        extra = "allow"
 
 
 class OllamaGenerateRequest(BaseModel):
