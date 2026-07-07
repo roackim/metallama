@@ -321,6 +321,13 @@ async def _parallel_stream(
         yield {"status": "error", "filename": filename, "error": failed_error}
         return
 
+    # All blocks downloaded — finalize: rename .partial → final .gguf name.
+    partial_path.rename(final_path)
+    if meta_path.exists():
+        meta_path.unlink()
+    yield {"status": "done", "filename": filename, "path": str(final_path), "size": final_path.stat().st_size}
+
+
 async def download_model(
     repo_id: str,
     filenames: list[str],

@@ -683,7 +683,7 @@ function cardTemplate(model) {
     ? `<span class="info-item vram-est${estWarn ? " warn" : ""}" title="${escapeHtml(estTitle)}">≈${est.total_gb} GB${estWarn ? " ⚠" : ""}</span>`
     : "";
   const autoStartChip = isManaged
-    ? `<button class="autostart-chip${model.auto_start ? " on" : ""} admin-only" data-id="${model.id}" data-action="autostart" title="${model.auto_start ? "Auto-start on launch · click to disable" : "Auto-start on launch · currently off — click to enable"}">auto</button>`
+    ? `<label class="autostart-check admin-only" title="${model.auto_start ? "Auto-start on launch · click to disable" : "Auto-start on launch · currently off — click to enable"}"><input type="checkbox" data-id="${model.id}" data-action="autostart" ${model.auto_start ? "checked" : ""}><span>auto</span></label>`
     : "";
 
   const pidChip = isManaged && model.pid !== undefined
@@ -892,7 +892,7 @@ export function setupModels() {
 
   modelsEl.addEventListener("click", async (event) => {
     const target = event.target;
-    if (!(target instanceof HTMLButtonElement)) {
+    if (!(target instanceof HTMLButtonElement) && !(target instanceof HTMLInputElement)) {
       return;
     }
 
@@ -948,10 +948,10 @@ export function setupModels() {
       }
 
       if (action === "autostart") {
-        const current = target.classList.contains("on");
+        const enabled = target instanceof HTMLInputElement ? target.checked : !target.classList.contains("on");
         await api(`/api/models/${encodeURIComponent(modelId)}/auto-start`, {
           method: "POST",
-          body: JSON.stringify({ enabled: !current }),
+          body: JSON.stringify({ enabled }),
         });
         await refreshModels();
         return;

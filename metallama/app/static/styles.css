@@ -1587,44 +1587,57 @@ body.admin-locked .disabled-readonly {
   opacity: 1;
 }
 
-/* ── Auto-start button ───────────────────────────────── */
-.autostart-chip {
+/* ── Auto-start checkbox ─────────────────────────────── */
+.autostart-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
   cursor: pointer;
   font-family: ui-monospace, monospace;
   font-size: 0.68rem;
   font-weight: 700;
-  width: 72px;
-  min-height: 24px;
-  padding: 0.12rem 0.3rem;
-  border-radius: var(--radius-sm);
-  border: var(--border-size) solid var(--line);
   color: var(--muted);
-  background: transparent;
-  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
-  text-align: center;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 1;
+  user-select: none;
+  white-space: nowrap;
 }
 
-.autostart-chip.on {
-  color: #fff;
+.autostart-check input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border: var(--border-size) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+  margin: 0;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.autostart-check input:checked {
   background: var(--green);
   border-color: var(--green);
 }
 
-.autostart-chip:hover:not(:disabled) {
-  opacity: 1;
-  color: var(--text);
-  border-color: color-mix(in srgb, var(--line) 80%, var(--text));
-  background: color-mix(in srgb, var(--line) 35%, transparent);
+.autostart-check input:checked::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 0px;
+  width: 4px;
+  height: 8px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
 }
 
-.autostart-chip.on:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--green) 80%, #000);
-  border-color: color-mix(in srgb, var(--green) 80%, #000);
-  color: #fff;
+.autostart-check input:checked + span {
+  color: var(--green);
+}
+
+.autostart-check:hover input:not(:checked) {
+  border-color: color-mix(in srgb, var(--line) 80%, var(--text));
 }
 
 /* ── Unexpected-exit banner ────────────────────────────── */
