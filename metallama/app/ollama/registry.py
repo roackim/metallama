@@ -31,11 +31,11 @@ def rebuild_registry() -> None:
 
     ucfg = load_unified_config()
     for s in ucfg.managed_servers:
-        ctx = (s.context_window or 4096) * (s.parallel or 1)
         merged[s.name] = SubserverConfig(
             name=s.name,
             url=f"http://127.0.0.1:{s.port}",
-            context_length=ctx,
+            context_length=s.context_window or 4096,
+            parallel=s.parallel or 1,
         )
     for s in ucfg.remote_servers:
         merged.setdefault(
