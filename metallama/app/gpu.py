@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import subprocess
 import time
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # Detected once at import; each entry is (used_mb, total_mb) per GPU.
 _tool: str | None = None
@@ -12,6 +15,13 @@ _tool_detected = False
 
 _MEM_CACHE_TTL = 5.0
 _mem_cache: tuple[float, list[dict[str, float]] | None] = (0.0, None)
+
+# Common install locations for nvidia-smi (not always on PATH under systemd/containers)
+_NVIDIA_SMI_CANDIDATES = (
+    "/usr/bin/nvidia-smi",
+    "/usr/local/bin/nvidia-smi",
+    "/usr/lib/nvidia/bin/nvidia-smi",
+)
 
 
 def detect_tool() -> str | None:
@@ -22,7 +32,21 @@ def detect_tool() -> str | None:
             (t for t in ("nvidia-smi", "rocm-smi", "amd-smi") if shutil.which(t)),
             None,
         )
+        # Fallback: check common absolute paths if nvidia-smi isn't on PATH
+        # (common under systemd services or containers with minimal PATH).
+        if _tool is None:
+            for path in _NVIDIA_SMI_CANDIDATES:
+                try:
+                    if subprocess.run(
+                        [path, "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+                        capture_output=True, text=True, timeout=3,
+                    ).returncode == 0:
+                        _tool = path
+                        break
+                except Exception:
+                    continue
         _tool_detected = True
+        logger.info("GPU tool detected: %s", _tool or "none")
     return _tool
 
 
@@ -34,8 +58,9 @@ def _run(cmd: list[str]) -> str:
 
 
 def _query_nvidia() -> list[dict[str, float]]:
+    tool = detect_tool() or "nvidia-smi"
     out = _run([
-        "nvidia-smi",
+        tool,
         "--query-gpu=memory.used,memory.total",
         "--format=csv,noheader,nounits",
     ])
@@ -49,9 +74,12 @@ def _query_nvidia() -> list[dict[str, float]]:
                 # .split()[0] strips units if nounits is ignored by older drivers
                 used_mb = float(parts[0].strip().split()[0])
                 total_mb = float(parts[1].strip().split()[0])
-            except (ValueError, IndexError):
+            except (ValueError, IndexError) as exc:
+                logger.warning("nvidia-smi: failed to parse line %r: %s", line, exc)
                 continue
             gpus.append({"used_mb": used_mb, "total_mb": total_mb})
+    if not gpus:
+        logger.warning("nvidia-smi: no GPUs parsed from output:\n%s", out[:500])
     return gpus
 
 
@@ -103,7 +131,7 @@ def get_gpu_memory() -> list[dict[str, float]] | None:
     tool = detect_tool()
     gpus: list[dict[str, float]] | None
     try:
-        if tool == "nvidia-smi":
+        if tool == "nvidia-smi" or (tool and tool.endswith("nvidia-smi")):
             gpus = _query_nvidia()
         elif tool == "rocm-smi":
             gpus = _query_rocm()
@@ -111,7 +139,8 @@ def get_gpu_memory() -> list[dict[str, float]] | None:
             gpus = _query_amd()
         else:
             gpus = None
-    except Exception:
+    except Exception as exc:
+        logger.error("GPU memory query failed (tool=%s): %s", tool, exc, exc_info=True)
         gpus = None
 
     _mem_cache = (time.time(), gpus)
@@ -134,7 +163,7 @@ def vram_status() -> dict[str, Any]:
         return {"error": "no GPU tool found (nvidia-smi / rocm-smi / amd-smi)", "available": False}
     gpus_raw = get_gpu_memory()
     if gpus_raw is None:
-        return {"error": f"{tool} failed", "available": False}
+        return {"error": f"{tool} failed (check server logs)", "available": False}
     gpus = []
     for g in gpus_raw:
         used_mb, total_mb = g["used_mb"], g["total_mb"]
