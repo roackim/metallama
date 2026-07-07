@@ -41,9 +41,17 @@ def _query_nvidia() -> list[dict[str, float]]:
     ])
     gpus = []
     for line in out.strip().splitlines():
+        if not line.strip():
+            continue
         parts = line.split(",")
         if len(parts) >= 2:
-            gpus.append({"used_mb": float(parts[0]), "total_mb": float(parts[1])})
+            try:
+                # .split()[0] strips units if nounits is ignored by older drivers
+                used_mb = float(parts[0].strip().split()[0])
+                total_mb = float(parts[1].strip().split()[0])
+            except (ValueError, IndexError):
+                continue
+            gpus.append({"used_mb": used_mb, "total_mb": total_mb})
     return gpus
 
 

@@ -129,11 +129,25 @@ def estimate_vram_gb(
             key_len = embed // heads
         value_len = meta.get(f"{arch}.attention.value_length") or key_len
         if layers and kv_heads and key_len and value_len:
-            # Hybrid SSM/attention models (e.g. Qwen3.5+) only keep a KV cache
-            # on every Nth layer; the rest use constant-size recurrent state.
             interval = meta.get(f"{arch}.full_attention_interval")
-            kv_layers = max(1, int(layers) // int(interval)) if interval and int(interval) > 1 else int(layers)
-            kv_bytes = float(kv_layers) * context_tokens * kv_heads * (key_len + value_len) * kv_bytes_per_element
+            sliding_window = meta.get(f"{arch}.attention.sliding_window")
+            if interval and int(interval) > 1:
+                # Hybrid SSM/attention (e.g. Qwen3.5+): KV cache only on every Nth layer.
+                kv_layers = max(1, int(layers) // int(interval))
+                kv_bytes = float(kv_layers) * context_tokens * kv_heads * (key_len + value_len) * kv_bytes_per_element
+            elif sliding_window and int(sliding_window) > 0 and int(sliding_window) < context_tokens:
+                # Sliding-window / alternating global-local attention (e.g. Gemma 3):
+                # ~1/6 of layers are global (full context), the rest use the local window.
+                n = int(layers)
+                sw = int(sliding_window)
+                global_n = max(1, round(n / 6))
+                local_n = n - global_n
+                kv_bytes = (
+                    float(global_n) * context_tokens
+                    + float(local_n) * sw
+                ) * kv_heads * (key_len + value_len) * kv_bytes_per_element
+            else:
+                kv_bytes = float(layers) * context_tokens * kv_heads * (key_len + value_len) * kv_bytes_per_element
 
     overhead_bytes = 1.0 * 1024**3  # compute buffers, graph, fragmentation
     total = weights_bytes + kv_bytes + overhead_bytes

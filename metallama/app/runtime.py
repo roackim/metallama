@@ -275,8 +275,8 @@ def vram_estimate_for(profile: ModelProfile) -> dict[str, Any] | None:
     if not est:
         return None
     free = get_free_vram_gb()
-    est["free_vram_gb"] = free
-    est["likely_fits"] = (est["total_gb"] <= free * _FIT_TOLERANCE) if free is not None else None
+    est["free_vram_gb"] = free  # type: ignore[assignment]
+    est["likely_fits"] = (est["total_gb"] <= free * _FIT_TOLERANCE) if free is not None else None  # type: ignore[assignment]
     return est
 
 
@@ -327,6 +327,10 @@ async def model_payload(profile: ModelProfile) -> dict[str, Any]:
             progress = _load_progress(profile, state)
             load_progress = round(progress, 3) if progress is not None else None
 
+    unified = load_unified_config()
+    server_entry = next((s for s in unified.managed_servers if s.name == profile.name), None)
+    auto_start = server_entry.auto_start if server_entry else False
+
     return {
         "id": profile.name,
         "display_name": profile.name,
@@ -350,5 +354,6 @@ async def model_payload(profile: ModelProfile) -> dict[str, Any]:
         "started_at": state.started_at if state else None,
         "last_log": last_log,
         "load_progress": load_progress,
+        "auto_start": auto_start,
         "vram_estimate": vram_estimate_for(profile) if model_found else None,
     }

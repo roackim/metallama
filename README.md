@@ -59,11 +59,9 @@ METALLAMA_BASE_URL=http://localhost
 | `METALLAMA_ADMIN_PASS_HASH` | Scrypt hash for admin login | _(empty — auth disabled)_ |
 | `METALLAMA_CONFIG_FILE` | Path to the servers config | `config.yaml` (repo root) |
 | `METALLAMA_DL_CONNECTIONS` | Parallel connections for HF downloads | `6` |
-| `METALLAMA_BIND_HOST` | Address llama-servers bind to (`0.0.0.0` to expose on LAN) | `127.0.0.1` |
+| `METALLAMA_BIND_HOST` | Address llama-servers bind to (`127.0.0.1` to restrict to localhost) | `0.0.0.0` |
 
 Captured llama-server logs are written to `logs/<server>.log` (rewritten on each start).
-
-
 ### Run
 
 ```bash

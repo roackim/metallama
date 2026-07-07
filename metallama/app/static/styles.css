@@ -25,8 +25,8 @@
   --btn-bg:     #111111;
   --btn-text:   #ffffff;
   --border-size: 1px;
-  --radius:     14px;
-  --radius-sm:  9px;
+  --radius:     2px;
+  --radius-sm:  2px;
 }
 
 :root[data-theme="dark"] {
@@ -295,7 +295,7 @@ body {
 
 .card-main-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(200px, 1.5fr) auto;
+  grid-template-columns: 1fr auto auto;
   gap: 1.2rem;
   align-items: center;
 }
@@ -316,15 +316,16 @@ body {
 
 .card-actions-col {
   display: flex;
-  align-items: stretch;
+  flex-direction: column;
+  align-items: center;
   justify-self: end;
-  gap: 0;
+  gap: 0.25rem;
 }
 
 .card-center-col {
   display: flex;
   flex-direction: column;
-  align-items: end;
+  align-items: center;
   justify-content: center;
   gap: 0.4rem;
 }
@@ -332,7 +333,7 @@ body {
 .btn-action-start,
 .btn-action-stop {
   font-weight: 700;
-  font-size: 0.9rem;
+  font-size: 0.78rem;
   padding: 0;
   line-height: 1;
   text-align: center;
@@ -341,8 +342,8 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 118px;
-  min-height: 44px;
+  width: 72px;
+  min-height: 30px;
   box-sizing: border-box;
 }
 
@@ -401,6 +402,52 @@ body {
   text-decoration: underline;
 }
 
+/* Data chips: PID, CTX, PAR, VRAM, auto-start */
+.info-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+/* Action controls: cmd, logs, edit — text-style, clearly not chips */
+.card-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.card-ctrl-btn {
+  background: transparent;
+  border: var(--border-size) solid var(--line);
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+  font-family: ui-monospace, monospace;
+  padding: 0.12rem 0.4rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+}
+
+.card-ctrl-btn:hover:not(:disabled) {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--line) 80%, var(--text));
+  background: color-mix(in srgb, var(--line) 35%, transparent);
+  opacity: 1;
+}
+
+.card-ctrl-btn.active {
+  color: var(--blue);
+}
+
+.card-ctrl-btn.active:hover:not(:disabled) {
+  color: var(--blue);
+  background: color-mix(in srgb, var(--blue) 12%, transparent);
+}
+
 .info-row {
   display: flex;
   align-items: center;
@@ -410,14 +457,11 @@ body {
 }
 
 .info-item {
-  color: var(--text);
+  color: var(--muted);
   font-family: ui-monospace, monospace;
   font-weight: 600;
   font-size: 0.76rem;
-  background: var(--bg);
-  border: var(--border-size) solid var(--line);
-  border-radius: 7px;
-  padding: 0.25rem 0.55rem;
+  padding: 0;
   line-height: 1.2;
 }
 
@@ -683,6 +727,18 @@ button:hover:not(:disabled) {
   background: transparent;
   color: var(--text);
   border: var(--border-size) solid var(--line);
+}
+
+.btn-danger {
+  background: transparent;
+  color: var(--red, #ef4444);
+  border: var(--border-size) solid var(--red, #ef4444);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--red, #ef4444);
+  color: #fff;
+  opacity: 1;
 }
 
 button:disabled {
@@ -1509,6 +1565,57 @@ body.admin-locked .disabled-readonly {
   border-color: var(--blue);
 }
 
+.autostart-btn.active {
+  color: var(--green);
+  border-color: var(--green);
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+}
+
+.autostart-btn.active:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--green) 22%, transparent);
+  opacity: 1;
+}
+
+/* ── Auto-start button ───────────────────────────────── */
+.autostart-chip {
+  cursor: pointer;
+  font-family: ui-monospace, monospace;
+  font-size: 0.68rem;
+  font-weight: 700;
+  width: 72px;
+  min-height: 24px;
+  padding: 0.12rem 0.3rem;
+  border-radius: var(--radius-sm);
+  border: var(--border-size) solid var(--line);
+  color: var(--muted);
+  background: transparent;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.autostart-chip.on {
+  color: #fff;
+  background: var(--green);
+  border-color: var(--green);
+}
+
+.autostart-chip:hover:not(:disabled) {
+  opacity: 1;
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--line) 80%, var(--text));
+  background: color-mix(in srgb, var(--line) 35%, transparent);
+}
+
+.autostart-chip.on:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--green) 80%, #000);
+  border-color: color-mix(in srgb, var(--green) 80%, #000);
+  color: #fff;
+}
+
 /* ── Unexpected-exit banner ────────────────────────────── */
 .card-exit-banner {
   border: var(--border-size) solid color-mix(in srgb, var(--red) 75%, var(--line));
@@ -1795,6 +1902,17 @@ body.admin-locked .disabled-readonly {
 }
 
 .library-add {
+  flex-shrink: 0;
+}
+
+.library-item-actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-shrink: 0;
+  align-items: center;
+}
+
+.library-delete {
   flex-shrink: 0;
 }
 

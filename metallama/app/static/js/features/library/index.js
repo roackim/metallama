@@ -27,9 +27,12 @@ function modelItem(m) {
         <span class="library-item-name">${escapeHtml(m.name)}</span>
         <span class="library-item-meta">${escapeHtml(metaBits)}</span>
       </div>
-      ${hasServer
-        ? ""
-        : `<button class="btn-secondary btn-small library-add admin-only" data-path="${escapeHtml(m.path)}" title="Create a server for this model">+ Serve</button>`}
+      <div class="library-item-actions">
+        ${hasServer
+          ? ""
+          : `<button class="btn-secondary btn-small library-add admin-only" data-path="${escapeHtml(m.path)}" title="Create a server for this model">+ Serve</button>`}
+        <button class="btn-danger btn-small library-delete admin-only" data-rel="${escapeHtml(m.rel_path)}" data-name="${escapeHtml(m.name)}" title="Permanently delete this model file">Delete</button>
+      </div>
     </div>`;
 }
 
@@ -99,6 +102,23 @@ async function discardPartial(relPath, name) {
   await refreshLibrary();
 }
 
+async function deleteModel(relPath, name) {
+  if (!window.confirm(`Permanently delete "${name}"?\n\nThis cannot be undone.`)) {
+    return;
+  }
+  try {
+    await api("/api/library/models/delete", {
+      method: "POST",
+      body: JSON.stringify({ rel_path: relPath }),
+    });
+    setConfigMessage(`Deleted model: ${name}`);
+    window.__metallamaInvalidateModelCache?.();
+  } catch (err) {
+    setConfigMessage(err.message, true);
+  }
+  await refreshLibrary();
+}
+
 export function setupLibrary() {
   const panel = document.getElementById("library-panel");
   if (!panel) return;
@@ -123,6 +143,8 @@ export function setupLibrary() {
       const item = target.closest(".library-item");
       const name = item?.querySelector(".library-item-name")?.textContent || "this file";
       discardPartial(target.dataset.rel || "", name);
+    } else if (target.classList.contains("library-delete")) {
+      deleteModel(target.dataset.rel || "", target.dataset.name || "this model");
     }
   });
 

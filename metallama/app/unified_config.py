@@ -28,6 +28,7 @@ class ManagedServer(BaseModel):
     context_window: int | None = None
     parallel: int = 1
     extra_args: list[str] = Field(default_factory=list)
+    auto_start: bool = False
 
     @property
     def effective_display_name(self) -> str:
@@ -284,6 +285,8 @@ def save_unified_config(config: UnifiedConfig, path: str | Path | None = None) -
             lines.append(f'    engine: "{server.engine}"')
         lines.append(f"    context_window: {'null' if server.context_window is None else server.context_window}")
         lines.append(f"    parallel: {server.parallel}")
+        if server.auto_start:
+            lines.append(f"    auto_start: {str(server.auto_start).lower()}")
         if server.extra_args:
             lines.append("    extra_args:")
             for arg in server.extra_args:
