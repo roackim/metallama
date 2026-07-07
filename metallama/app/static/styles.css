@@ -325,7 +325,7 @@ body {
 .card-center-col {
   display: flex;
   flex-direction: column;
-  align-items: end;
+  align-items: center;
   justify-content: center;
   gap: 0.4rem;
 }
@@ -1597,18 +1597,10 @@ body.admin-locked .disabled-readonly {
   line-height: 1;
 }
 
-.autostart-chip::before {
-  content: '';
-}
-
 .autostart-chip.on {
   color: #fff;
   background: var(--green);
   border-color: var(--green);
-}
-
-.autostart-chip.on::before {
-  content: '';
 }
 
 .autostart-chip:hover:not(:disabled) {

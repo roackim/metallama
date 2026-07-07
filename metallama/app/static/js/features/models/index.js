@@ -718,16 +718,15 @@ function cardTemplate(model) {
           </div>
 
           ${infoChips ? `<div class="info-chips">${infoChips}</div>` : ""}
-
-          <div class="card-controls">
-            ${isManaged ? `<button class="card-ctrl-btn admin-only" data-id="${model.id}" data-action="cmd" title="Copy launch command">cmd</button>` : ""}
-            ${isManaged ? `<button class="card-ctrl-btn ${openLogs.has(model.id) ? "active" : ""}" data-id="${model.id}" data-action="logs" title="Show server logs">logs</button>` : ""}
-            <button class="card-ctrl-btn admin-only" data-id="${model.id}" data-managed="${isManaged}" data-action="edit" title="Edit server config">edit</button>
-          </div>
         </div>
 
         <div class="card-center-col">
           ${slotsHtml}
+          <div class="card-controls">
+            ${isManaged ? `<button class="card-ctrl-btn admin-only" data-id="${model.id}" data-action="cmd" title="Copy launch command">cmd</button>` : ""}
+            ${isManaged ? `<button class="card-ctrl-btn admin-only ${openLogs.has(model.id) ? "active" : ""}" data-id="${model.id}" data-action="logs" title="Show server logs">logs</button>` : ""}
+            <button class="card-ctrl-btn admin-only" data-id="${model.id}" data-managed="${isManaged}" data-action="edit" title="Edit server config">edit</button>
+          </div>
         </div>
 
         <div class="card-actions-col">
