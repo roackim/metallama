@@ -1598,8 +1598,7 @@ body.admin-locked .disabled-readonly {
 }
 
 .autostart-chip::before {
-  content: '○ ';
-  font-size: 0.62rem;
+  content: '';
 }
 
 .autostart-chip.on {
@@ -1609,7 +1608,7 @@ body.admin-locked .disabled-readonly {
 }
 
 .autostart-chip.on::before {
-  content: '● ';
+  content: '';
 }
 
 .autostart-chip:hover:not(:disabled) {
