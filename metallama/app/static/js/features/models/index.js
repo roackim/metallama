@@ -683,14 +683,14 @@ function cardTemplate(model) {
     ? `<span class="info-item vram-est${estWarn ? " warn" : ""}" title="${escapeHtml(estTitle)}">≈${est.total_gb} GB${estWarn ? " ⚠" : ""}</span>`
     : "";
   const autoStartChip = isManaged
-    ? `<button class="info-item autostart-chip${model.auto_start ? " on" : ""} admin-only" data-id="${model.id}" data-action="autostart" title="${model.auto_start ? "Auto-start on launch · click to disable" : "Auto-start on launch · currently off — click to enable"}">auto-start</button>`
+    ? `<button class="autostart-chip${model.auto_start ? " on" : ""} admin-only" data-id="${model.id}" data-action="autostart" title="${model.auto_start ? "Auto-start on launch · click to disable" : "Auto-start on launch · currently off — click to enable"}">auto-start</button>`
     : "";
 
   const pidChip = isManaged && model.pid !== undefined
     ? `<span class="info-item">PID ${model.pid ?? "—"}</span>` : "";
   const infoChips = isLLM
-    ? `${pidChip}<span class="info-item">CTX ${ctxKTokens}k</span>${parValue ? `<span class="info-item">×${parValue}</span>` : ""}${estChip}${autoStartChip}`
-    : `${pidChip}${autoStartChip}`;
+    ? `${pidChip}<span class="info-item">CTX ${ctxKTokens}k</span>${parValue ? `<span class="info-item">×${parValue}</span>` : ""}${estChip}`
+    : pidChip;
 
   const modelWarning = model.model_found === false
     ? `<p class="model-not-found-warning">Model weights not found locally</p>`
@@ -736,6 +736,7 @@ function cardTemplate(model) {
                <button class="btn-action-${action} disabled-readonly" disabled title="Admin access required">${label}</button>`
             : `<button class="btn-action-start disabled-remote" disabled title="Remote servers cannot be managed from here">${model.status === "online" ? "Stop" : "Start"}</button>`
           }
+          ${autoStartChip}
         </div>
       </div>
 
