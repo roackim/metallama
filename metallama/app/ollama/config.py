@@ -25,6 +25,7 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             url=f"http://localhost:{server.port}",
             size=0,
             context_length=server.context_window or 4096,
+            parallel=server.parallel or 1,
         ))
 
     # Remote (distant) servers are passed through as-is.

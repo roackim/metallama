@@ -11,6 +11,7 @@ class SubserverConfig(BaseModel):
     family: str = "unknown"
     parameter_size: str = "unknown"
     context_length: int = 4096
+    parallel: int = 1
     upstream_model_id: Optional[str] = None
     upstream_meta: dict[str, Any] = Field(default_factory=dict)
     reachable: bool = False

@@ -32,16 +32,25 @@ def _coerce_int(value: Any) -> int | None:
         return None
 
 
-def _extract_props_context_length(payload: dict[str, Any]) -> int | None:
+def _extract_props_context_length(payload: dict[str, Any], parallel: int = 1) -> int | None:
+    """Extract per-slot context length from llama-server's /props payload.
+
+    llama-server reports n_ctx as the TOTAL context budget (ctx_size × parallel),
+    not the per-slot value. We divide by parallel to recover the per-slot context.
+    """
     direct = _coerce_int(payload.get("n_ctx"))
-    if direct is not None:
-        return direct
-    dgs = payload.get("default_generation_settings")
-    if isinstance(dgs, dict):
-        nested = _coerce_int(dgs.get("n_ctx"))
-        if nested is not None:
-            return nested
-    return None
+    if direct is None:
+        dgs = payload.get("default_generation_settings")
+        if isinstance(dgs, dict):
+            direct = _coerce_int(dgs.get("n_ctx"))
+    if direct is None:
+        return None
+    # If the payload reports n_parallel, prefer it (handles remote servers
+    # where we don't know the configured parallel count).
+    n_parallel = _coerce_int(payload.get("n_parallel")) or parallel
+    if n_parallel > 1 and direct % n_parallel == 0:
+        return direct // n_parallel
+    return direct
 
 
 _DEFAULT_CONTEXT_LENGTH = 4096
@@ -59,7 +68,7 @@ async def probe_one(srv: SubserverConfig, client: httpx.AsyncClient) -> None:
             srv.reachable = True
             props_payload = r_props.json()
             if isinstance(props_payload, dict):
-                props_ctx = _extract_props_context_length(props_payload)
+                props_ctx = _extract_props_context_length(props_payload, srv.parallel)
     except (httpx.ConnectError, httpx.TimeoutException, ValueError):
         pass
 
