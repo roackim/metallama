@@ -10,9 +10,21 @@ function drawGraph(canvas, history, colors) {
     return;
   }
 
+  // Size the backing store to the displayed size × devicePixelRatio,
+  // so the canvas is crisp on HiDPI displays and not stretched/blurry.
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  const cssW = Math.max(1, Math.floor(rect.width));
+  const cssH = Math.max(1, Math.floor(rect.height));
+  if (canvas.width !== cssW * dpr || canvas.height !== cssH * dpr) {
+    canvas.width = cssW * dpr;
+    canvas.height = cssH * dpr;
+  }
+
   const ctx = canvas.getContext("2d");
-  const width = canvas.width;
-  const height = canvas.height;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const width = cssW;
+  const height = cssH;
   const padding = 2;
   const maxSamples = 500;
 
