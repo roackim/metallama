@@ -949,7 +949,7 @@ export function setupModels() {
       }
 
       if (action === "autostart") {
-        const current = target.classList.contains("active");
+        const current = target.classList.contains("on");
         await api(`/api/models/${encodeURIComponent(modelId)}/auto-start`, {
           method: "POST",
           body: JSON.stringify({ enabled: !current }),
