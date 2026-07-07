@@ -685,6 +685,18 @@ button:hover:not(:disabled) {
   border: var(--border-size) solid var(--line);
 }
 
+.btn-danger {
+  background: transparent;
+  color: var(--red, #ef4444);
+  border: var(--border-size) solid var(--red, #ef4444);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--red, #ef4444);
+  color: #fff;
+  opacity: 1;
+}
+
 button:disabled {
   opacity: 0.3;
   cursor: not-allowed;
@@ -1795,6 +1807,17 @@ body.admin-locked .disabled-readonly {
 }
 
 .library-add {
+  flex-shrink: 0;
+}
+
+.library-item-actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-shrink: 0;
+  align-items: center;
+}
+
+.library-delete {
   flex-shrink: 0;
 }
 

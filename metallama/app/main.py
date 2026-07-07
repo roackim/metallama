@@ -296,6 +296,33 @@ def discard_partial(payload: dict[str, Any] = Body(...), _guard: None = Depends(
     return {"ok": True, "discarded": rel_path}
 
 
+@app.post("/api/library/models/delete")
+def delete_model(payload: dict[str, Any] = Body(...), _guard: None = Depends(admin_guard)) -> dict[str, Any]:
+    """Permanently delete a GGUF model file from the models directory."""
+    rel_path = payload.get("rel_path", "")
+    if not rel_path or not isinstance(rel_path, str):
+        raise HTTPException(status_code=400, detail="rel_path is required")
+    models_dir = Config.MODELS_DIR
+    if not models_dir:
+        raise HTTPException(status_code=400, detail="METALLAMA_MODELS_DIR is not set")
+
+    models_path = Path(models_dir).resolve()
+    target = (models_path / rel_path).resolve()
+    try:
+        common = os.path.commonpath([str(models_path), str(target)])
+    except ValueError:
+        raise HTTPException(status_code=400, detail="rel_path escapes the models directory")
+    if common != str(models_path):
+        raise HTTPException(status_code=400, detail="rel_path escapes the models directory")
+    if target.suffix != ".gguf":
+        raise HTTPException(status_code=400, detail="rel_path must point to a .gguf file")
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="Model file not found")
+
+    target.unlink()
+    return {"ok": True, "deleted": rel_path}
+
+
 @app.get("/api/model-files")
 def list_model_files() -> dict[str, Any]:
     """Scan METALLAMA_MODELS_DIR for .gguf files and return their paths."""
