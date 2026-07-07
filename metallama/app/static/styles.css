@@ -25,8 +25,8 @@
   --btn-bg:     #111111;
   --btn-text:   #ffffff;
   --border-size: 1px;
-  --radius:     14px;
-  --radius-sm:  9px;
+  --radius:     2px;
+  --radius-sm:  2px;
 }
 
 :root[data-theme="dark"] {
