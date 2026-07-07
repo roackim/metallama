@@ -590,8 +590,44 @@ def model_logs(model_name: str, since: int = 0, tail: int = 0) -> dict[str, Any]
 
 
 @app.on_event("startup")
-async def probe_ollama_subservers() -> None:
+async def startup_tasks() -> None:
+    import logging
+    _log = logging.getLogger(__name__)
+
     await probe_subservers()
+
+    # Auto-start servers flagged with auto_start: true in config.
+    from .unified_config import load_unified_config
+    cfg = load_unified_config()
+    for server in cfg.managed_servers:
+        if not server.auto_start:
+            continue
+        profile = MODEL_PROFILES.get(server.name)
+        if not profile:
+            continue
+        try:
+            cleanup_dead(server.name)
+            if runtime_processes.get(server.name) or is_port_open("127.0.0.1", profile.port):
+                continue  # already running
+            command = build_command(profile)
+            proc = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                errors="replace",
+                bufsize=1,
+            )
+            from .logs import begin_capture
+            begin_capture(server.name, proc)
+            runtime_processes[server.name] = ProcessState(
+                process=proc,
+                started_at=time.time(),
+                command=command,
+            )
+            _log.info("Auto-started server: %s (pid %d)", server.name, proc.pid)
+        except Exception as exc:
+            _log.warning("Auto-start failed for %s: %s", server.name, exc)
 
 
 @app.on_event("shutdown")
@@ -602,6 +638,23 @@ def stop_all_on_shutdown() -> None:
             mark_expected_stop(model_id)
             proc.send_signal(signal.SIGTERM)
         runtime_processes.pop(model_id, None)
+
+
+@app.post("/api/models/{model_name}/auto-start")
+async def set_auto_start(model_name: str, payload: dict[str, Any] = Body(...), _guard: None = Depends(admin_guard)) -> dict[str, Any]:
+    """Toggle auto-start on launch for a managed server."""
+    from .profiles import reload_model_profiles
+    from .unified_config import update_managed_server, clear_config_cache
+
+    profile = MODEL_PROFILES.get(model_name)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Unknown model")
+
+    enabled = bool(payload.get("enabled", False))
+    update_managed_server(model_name, {"auto_start": enabled})
+    clear_config_cache()
+    reload_model_profiles()
+    return {"ok": True, "auto_start": enabled, "model": await model_payload(profile)}
 
 
 @app.get("/api/models/{model_id}/command")

@@ -28,6 +28,7 @@ class ManagedServer(BaseModel):
     context_window: int | None = None
     parallel: int = 1
     extra_args: list[str] = Field(default_factory=list)
+    auto_start: bool = False
 
     @property
     def effective_display_name(self) -> str:

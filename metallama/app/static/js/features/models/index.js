@@ -722,6 +722,7 @@ function cardTemplate(model) {
             ${isManaged ? `<button class="btn-secondary btn-small admin-only" data-id="${model.id}" data-action="cmd" title="Copy launch command">CMD</button>` : ""}
             ${isManaged ? `<button class="btn-secondary btn-small ${openLogs.has(model.id) ? "active" : ""}" data-id="${model.id}" data-action="logs" title="Show server logs">Logs</button>` : ""}
             <button class="btn-secondary btn-small admin-only" data-id="${model.id}" data-managed="${isManaged}" data-action="edit" title="Edit server config">Edit</button>
+            ${isManaged ? `<button class="btn-secondary btn-small admin-only autostart-btn${model.auto_start ? " active" : ""}" data-id="${model.id}" data-action="autostart" title="${model.auto_start ? "Auto-start enabled — click to disable" : "Enable auto-start on launch"}">⏻</button>` : ""}
           </div>
         </div>
 
@@ -943,6 +944,16 @@ export function setupModels() {
       if (action === "edit") {
         const isManaged = target.dataset.managed !== "false";
         openEditModal(modelId, isManaged);
+        return;
+      }
+
+      if (action === "autostart") {
+        const current = target.classList.contains("active");
+        await api(`/api/models/${encodeURIComponent(modelId)}/auto-start`, {
+          method: "POST",
+          body: JSON.stringify({ enabled: !current }),
+        });
+        await refreshModels();
         return;
       }
 

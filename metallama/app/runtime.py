@@ -327,6 +327,10 @@ async def model_payload(profile: ModelProfile) -> dict[str, Any]:
             progress = _load_progress(profile, state)
             load_progress = round(progress, 3) if progress is not None else None
 
+    unified = load_unified_config()
+    server_entry = next((s for s in unified.managed_servers if s.name == profile.name), None)
+    auto_start = server_entry.auto_start if server_entry else False
+
     return {
         "id": profile.name,
         "display_name": profile.name,
@@ -350,5 +354,6 @@ async def model_payload(profile: ModelProfile) -> dict[str, Any]:
         "started_at": state.started_at if state else None,
         "last_log": last_log,
         "load_progress": load_progress,
+        "auto_start": auto_start,
         "vram_estimate": vram_estimate_for(profile) if model_found else None,
     }
