@@ -295,7 +295,7 @@ body {
 
 .card-main-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(200px, 1.5fr) auto;
+  grid-template-columns: 1fr auto auto;
   gap: 1.2rem;
   align-items: center;
 }
@@ -332,7 +332,7 @@ body {
 .btn-action-start,
 .btn-action-stop {
   font-weight: 700;
-  font-size: 0.9rem;
+  font-size: 0.82rem;
   padding: 0;
   line-height: 1;
   text-align: center;
@@ -341,8 +341,8 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 118px;
-  min-height: 44px;
+  width: 88px;
+  min-height: 34px;
   box-sizing: border-box;
 }
 
@@ -399,6 +399,50 @@ body {
 
 .endpoint-link:hover {
   text-decoration: underline;
+}
+
+/* Data chips: PID, CTX, PAR, VRAM, auto-start */
+.info-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+/* Action controls: cmd, logs, edit — text-style, clearly not chips */
+.card-controls {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+.card-ctrl-btn {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 600;
+  font-family: ui-monospace, monospace;
+  padding: 0.18rem 0.5rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color 0.12s ease, background 0.12s ease;
+  letter-spacing: 0.01em;
+}
+
+.card-ctrl-btn:hover:not(:disabled) {
+  color: var(--text);
+  background: color-mix(in srgb, var(--line) 35%, transparent);
+  opacity: 1;
+}
+
+.card-ctrl-btn.active {
+  color: var(--blue);
+}
+
+.card-ctrl-btn.active:hover:not(:disabled) {
+  color: var(--blue);
+  background: color-mix(in srgb, var(--blue) 12%, transparent);
 }
 
 .info-row {
@@ -1530,6 +1574,34 @@ body.admin-locked .disabled-readonly {
 .autostart-btn.active:hover:not(:disabled) {
   background: color-mix(in srgb, var(--green) 22%, transparent);
   opacity: 1;
+}
+
+/* ── Auto-start chip ─────────────────────────────────── */
+.autostart-chip {
+  cursor: pointer;
+  font-family: ui-monospace, monospace;
+  color: var(--muted);
+  background: transparent;
+  border-color: color-mix(in srgb, var(--line) 55%, transparent);
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.autostart-chip.on {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 10%, var(--bg));
+  border-color: color-mix(in srgb, var(--green) 55%, var(--line));
+}
+
+.autostart-chip:hover:not(:disabled) {
+  opacity: 1;
+  color: var(--text);
+  border-color: var(--line);
+}
+
+.autostart-chip.on:hover:not(:disabled) {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 18%, var(--bg));
+  border-color: var(--green);
 }
 
 /* ── Unexpected-exit banner ────────────────────────────── */

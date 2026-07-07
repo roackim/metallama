@@ -275,8 +275,8 @@ def vram_estimate_for(profile: ModelProfile) -> dict[str, Any] | None:
     if not est:
         return None
     free = get_free_vram_gb()
-    est["free_vram_gb"] = free
-    est["likely_fits"] = (est["total_gb"] <= free * _FIT_TOLERANCE) if free is not None else None
+    est["free_vram_gb"] = free  # type: ignore[assignment]
+    est["likely_fits"] = (est["total_gb"] <= free * _FIT_TOLERANCE) if free is not None else None  # type: ignore[assignment]
     return est
 
 

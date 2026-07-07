@@ -297,7 +297,7 @@ def discard_partial(payload: dict[str, Any] = Body(...), _guard: None = Depends(
 
 
 @app.post("/api/library/models/delete")
-def delete_model(payload: dict[str, Any] = Body(...), _guard: None = Depends(admin_guard)) -> dict[str, Any]:
+def delete_library_model(payload: dict[str, Any] = Body(...), _guard: None = Depends(admin_guard)) -> dict[str, Any]:
     """Permanently delete a GGUF model file from the models directory."""
     rel_path = payload.get("rel_path", "")
     if not rel_path or not isinstance(rel_path, str):

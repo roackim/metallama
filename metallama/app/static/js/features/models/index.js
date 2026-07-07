@@ -675,21 +675,22 @@ function cardTemplate(model) {
   const est = model.vram_estimate;
   const estWarn = est && est.likely_fits === false && model.status === "offline";
   const estTitle = est
-    ? `Estimated VRAM (upper bound): weights ≈ ${est.weights_gb} GB + KV cache ≈ ${est.kv_cache_gb} GB + ~1 GB overhead.` +
-      (est.free_vram_gb != null ? ` Free VRAM now: ${est.free_vram_gb} GB.` : "") +
-      (estWarn ? " Likely will NOT fit — reduce context, parallel slots, or use a smaller quant." : "")
+    ? `Estimated VRAM: weights ≈ ${est.weights_gb} GB + KV cache ≈ ${est.kv_cache_gb} GB + ~1 GB overhead.` +
+      (est.free_vram_gb != null ? ` Free VRAM: ${est.free_vram_gb} GB.` : "") +
+      (estWarn ? " Likely won't fit — reduce context, parallel slots, or use a smaller quant." : "")
     : "";
   const estChip = est
     ? `<span class="info-item vram-est${estWarn ? " warn" : ""}" title="${escapeHtml(estTitle)}">≈${est.total_gb} GB${estWarn ? " ⚠" : ""}</span>`
     : "";
-  const ctxDisplay =
-    isLLM
-      ? `
-    <span class="info-item">CTX: ${ctxKTokens}k</span>
-    ${parValue ? `<span class="info-item">PAR: ${parValue}</span>` : ""}
-    ${estChip}
-  `
-      : "";
+  const autoStartChip = isManaged
+    ? `<button class="info-item autostart-chip${model.auto_start ? " on" : ""} admin-only" data-id="${model.id}" data-action="autostart" title="${model.auto_start ? "Auto-start on launch · click to disable" : "Auto-start on launch · currently off — click to enable"}">auto-start</button>`
+    : "";
+
+  const pidChip = isManaged && model.pid !== undefined
+    ? `<span class="info-item">PID ${model.pid ?? "—"}</span>` : "";
+  const infoChips = isLLM
+    ? `${pidChip}<span class="info-item">CTX ${ctxKTokens}k</span>${parValue ? `<span class="info-item">×${parValue}</span>` : ""}${estChip}${autoStartChip}`
+    : `${pidChip}${autoStartChip}`;
 
   const modelWarning = model.model_found === false
     ? `<p class="model-not-found-warning">Model weights not found locally</p>`
@@ -711,18 +712,17 @@ function cardTemplate(model) {
       <div class="card-main-row">
         <div class="card-meta-col">
           <div class="endpoint-row">
-            <span class="endpoint-label">URL:</span>
+            <span class="endpoint-label">URL</span>
             <a class="endpoint-link" href="${model.url}" target="_blank">${model.url}</a>
-            ${model.status === "online" ? `<button class="btn-secondary btn-small btn-chat" data-id="${model.id}" data-action="open" data-url="${model.url}" title="Open llama.cpp's chat UI">Chat ↗</button>` : ""}
+            ${model.status === "online" ? `<button class="btn-secondary btn-small btn-chat" data-id="${model.id}" data-action="open" data-url="${model.url}" title="Open llama.cpp's chat UI">chat ↗</button>` : ""}
           </div>
 
-          <div class="info-row">
-            ${isManaged && model.pid !== undefined ? `<span class="info-item">PID: ${model.pid ?? "-"}</span>` : ""}
-            ${ctxDisplay}
-            ${isManaged ? `<button class="btn-secondary btn-small admin-only" data-id="${model.id}" data-action="cmd" title="Copy launch command">CMD</button>` : ""}
-            ${isManaged ? `<button class="btn-secondary btn-small ${openLogs.has(model.id) ? "active" : ""}" data-id="${model.id}" data-action="logs" title="Show server logs">Logs</button>` : ""}
-            <button class="btn-secondary btn-small admin-only" data-id="${model.id}" data-managed="${isManaged}" data-action="edit" title="Edit server config">Edit</button>
-            ${isManaged ? `<button class="btn-secondary btn-small admin-only autostart-btn${model.auto_start ? " active" : ""}" data-id="${model.id}" data-action="autostart" title="${model.auto_start ? "Auto-start enabled — click to disable" : "Enable auto-start on launch"}">⏻</button>` : ""}
+          ${infoChips ? `<div class="info-chips">${infoChips}</div>` : ""}
+
+          <div class="card-controls">
+            ${isManaged ? `<button class="card-ctrl-btn admin-only" data-id="${model.id}" data-action="cmd" title="Copy launch command">cmd</button>` : ""}
+            ${isManaged ? `<button class="card-ctrl-btn ${openLogs.has(model.id) ? "active" : ""}" data-id="${model.id}" data-action="logs" title="Show server logs">logs</button>` : ""}
+            <button class="card-ctrl-btn admin-only" data-id="${model.id}" data-managed="${isManaged}" data-action="edit" title="Edit server config">edit</button>
           </div>
         </div>
 
