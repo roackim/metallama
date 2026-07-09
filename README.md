@@ -1,27 +1,51 @@
+<!-- <div align="center"> -->
+<div style="text-align: left; width: 100%;">
+<table>
+<tr>
+  <td width="30%">
+    <picture>
+      <source srcset="metallama/app/static/logo.svg" width="250">
+      <img alt="Metallama project logo">
+    </picture>
+  </td>
+  <td width="70%">
+    <h1>
+    Metallama
+    </h1>
+    Easily instantiate and manage llamacpp servers.
+  </td>
+</tr>
+</table>
+</div>
+<!-- </div> -->
+
+
+
 # Metallama
 
 A lightweight web UI for managing llama.cpp servers, downloading models from HuggingFace, and exposing everything behind a single Ollama-compatible API gateway.
 
-Built with FastAPI (Python 3.11+) and vanilla HTML/CSS/JS, no build.
+Built with FastAPI and vanilla HTML/CSS/JS, no build.
 
 ## What It Does
 
 - **Download GGUF models** — browse HuggingFace Hub, pick `.gguf` files, download with live speed, cancel/resume, and a one-click "create server" on completion
 - **Spawn & manage llama.cpp instances** — start, stop, and configure local servers from a web UI, with live logs, load-progress bars, and crash diagnostics on every card
-- **VRAM-fit estimates** — GGUF metadata is parsed locally to warn before you launch a model that won't fit
 - **Unified Ollama-compatible gateway** — one `/ollama` endpoint fans out requests to all registered servers
 - **Plug in remote servers** — point to llama.cpp instances on other machines and route through the same gateway
 - **OpenAI-compatible API** — `/v1/chat/completions` and model listing work out of the box
 - **Live system monitoring** — VRAM (NVIDIA, ROCm, or amd-smi) and RAM usage with history graphs
 - **Optional admin auth** — scrypt-based password login with 8-hour sessions
 - **Dark / light theme**
+- **VRAM-fit estimates** — (WIP) GGUF metadata is parsed locally to warn before you launch a model that won't fit
+
 
 ## Quick Start
 
 ### Requirements
 
 - Python ≥ 3.11
-- [uv](https://docs.astral.sh/uv/) (recommended) or pip
+- [uv](https://docs.astral.sh/uv/) (recommended) or python venv + pip
 - `llama-server` binary (only needed for local models)
 - `nvidia-smi`, `rocm-smi`, or `amd-smi` (optional, for VRAM monitoring and fit estimates)
 
