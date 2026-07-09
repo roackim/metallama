@@ -60,7 +60,7 @@ body {
 
 /* ── Page Header ────────────────────────────────────────── */
 .page-header {
-  padding: 1.25rem 0;
+  padding: 0.6rem 0;
   background: var(--panel);
   border-bottom: var(--border-size) solid var(--line);
 }
@@ -68,7 +68,7 @@ body {
 .header-container {
   max-width: 1560px;
   margin: 0 auto;
-  padding: 0 1.5rem;
+  padding: 0 1rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -77,17 +77,17 @@ body {
 .header-content {
   display: flex;
   align-items: center;
-  gap: 1.5rem;
+  gap: 1rem;
 }
 
-.header-logo-glyph {
-  font-size: 2.6rem;
-  line-height: 1;
-  display: block;
+.header-logo {
+  width: 5.5rem;
+  height: 5.5rem;
+  flex-shrink: 0;
 }
 
 .hero-title {
-  font-size: 1.5rem;
+  font-size: 2rem;
   font-weight: 800;
   letter-spacing: 0.01em;
   line-height: 1;
