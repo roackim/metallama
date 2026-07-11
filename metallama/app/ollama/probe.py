@@ -63,7 +63,7 @@ async def probe_one(srv: SubserverConfig, client: httpx.AsyncClient) -> None:
     srv.reachable = False
 
     try:
-        r_props = await client.get(f"{srv.url}/props")
+        r_props = await client.get(f"{srv.url}/props", timeout=_PROBE_TIMEOUT)
         if r_props.status_code == 200:
             srv.reachable = True
             props_payload = r_props.json()
@@ -73,7 +73,7 @@ async def probe_one(srv: SubserverConfig, client: httpx.AsyncClient) -> None:
         pass
 
     try:
-        r_models = await client.get(f"{srv.url}/v1/models")
+        r_models = await client.get(f"{srv.url}/v1/models", timeout=_PROBE_TIMEOUT)
         if r_models.status_code == 200:
             srv.reachable = True
             models = r_models.json().get("data", [])
@@ -112,6 +112,8 @@ async def probe_one(srv: SubserverConfig, client: httpx.AsyncClient) -> None:
 
 async def probe_subservers() -> None:
     """Query all subservers and backfill missing metadata."""
-    async with httpx.AsyncClient(timeout=_PROBE_TIMEOUT) as client:
+    from ..http_client import shared_client
+
+    async with shared_client() as client:
         for srv in get_all_subservers():
             await probe_one(srv, client)

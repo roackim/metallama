@@ -9,6 +9,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from ...http_client import shared_client
 from ..probe import probe_one, _DEFAULT_CONTEXT_LENGTH
 from ..registry import get_subserver, get_all_subservers
 from ..schemas import OllamaChatRequest, OllamaGenerateRequest, OllamaShowRequest
@@ -35,10 +36,10 @@ def _now() -> str:
 @router.get("/api/tags")
 async def list_tags() -> JSONResponse:
     models = []
-    async with httpx.AsyncClient(timeout=_HEALTH_TIMEOUT) as client:
+    async with shared_client() as client:
         for srv in get_all_subservers():
             try:
-                resp = await client.get(f"{srv.url}/health")
+                resp = await client.get(f"{srv.url}/health", timeout=_HEALTH_TIMEOUT)
                 if resp.status_code != 200:
                     continue
             except (httpx.ConnectError, httpx.TimeoutException):
@@ -77,10 +78,10 @@ async def list_tags() -> JSONResponse:
 @router.get("/api/ps")
 async def list_running() -> JSONResponse:
     running = []
-    async with httpx.AsyncClient(timeout=_HEALTH_TIMEOUT) as client:
+    async with shared_client() as client:
         for srv in get_all_subservers():
             try:
-                resp = await client.get(f"{srv.url}/health")
+                resp = await client.get(f"{srv.url}/health", timeout=_HEALTH_TIMEOUT)
                 if resp.status_code == 200:
                     model_name = srv.upstream_model_id or srv.name
                     running.append(
@@ -312,8 +313,8 @@ async def chat(req: OllamaChatRequest) -> StreamingResponse | JSONResponse:
     if req.stream:
         async def generate() -> AsyncIterator[bytes]:
             try:
-                async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-                    async with client.stream("POST", f"{srv.url}/v1/chat/completions", json=payload) as resp:
+                async with shared_client() as client:
+                    async with client.stream("POST", f"{srv.url}/v1/chat/completions", json=payload, timeout=_TIMEOUT) as resp:
                         if resp.status_code != 200:
                             body = await resp.aread()
                             yield (json.dumps({"error": f"upstream error: {body.decode(errors='replace')[:300]}"}) + "\n").encode()
@@ -328,8 +329,8 @@ async def chat(req: OllamaChatRequest) -> StreamingResponse | JSONResponse:
         return StreamingResponse(generate(), media_type="application/x-ndjson")
 
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.post(f"{srv.url}/v1/chat/completions", json=payload)
+        async with shared_client() as client:
+            resp = await client.post(f"{srv.url}/v1/chat/completions", json=payload, timeout=_TIMEOUT)
     except httpx.ConnectError:
         raise HTTPException(status_code=502, detail={"error": "upstream unreachable"})
     except httpx.TimeoutException:
@@ -388,8 +389,8 @@ async def generate_endpoint(req: OllamaGenerateRequest) -> StreamingResponse | J
     if req.stream:
         async def generate() -> AsyncIterator[bytes]:
             try:
-                async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-                    async with client.stream("POST", f"{srv.url}/v1/completions", json=payload) as resp:
+                async with shared_client() as client:
+                    async with client.stream("POST", f"{srv.url}/v1/completions", json=payload, timeout=_TIMEOUT) as resp:
                         if resp.status_code != 200:
                             yield (json.dumps({"error": "upstream error"}) + "\n").encode()
                             return
@@ -403,8 +404,8 @@ async def generate_endpoint(req: OllamaGenerateRequest) -> StreamingResponse | J
         return StreamingResponse(generate(), media_type="application/x-ndjson")
 
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.post(f"{srv.url}/v1/completions", json=payload)
+        async with shared_client() as client:
+            resp = await client.post(f"{srv.url}/v1/completions", json=payload, timeout=_TIMEOUT)
     except httpx.ConnectError:
         raise HTTPException(status_code=502, detail={"error": "upstream unreachable"})
     except httpx.TimeoutException:

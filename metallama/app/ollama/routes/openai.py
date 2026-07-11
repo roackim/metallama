@@ -7,6 +7,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from ...http_client import shared_client
 from ..probe import probe_one, _DEFAULT_CONTEXT_LENGTH
 from ..registry import get_subserver, get_all_subservers
 
@@ -24,10 +25,10 @@ _HEALTH_TIMEOUT = httpx.Timeout(1.0)
 @router.get("/v1/models")
 async def list_models() -> JSONResponse:
     models = []
-    async with httpx.AsyncClient(timeout=_HEALTH_TIMEOUT) as client:
+    async with shared_client() as client:
         for srv in get_all_subservers():
             try:
-                resp = await client.get(f"{srv.url}/health")
+                resp = await client.get(f"{srv.url}/health", timeout=_HEALTH_TIMEOUT)
                 if resp.status_code != 200:
                     continue
             except (httpx.ConnectError, httpx.TimeoutException):
@@ -67,8 +68,8 @@ async def chat_completions(request: Request) -> StreamingResponse | JSONResponse
     if stream:
         async def generate() -> AsyncIterator[bytes]:
             try:
-                async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-                    async with client.stream("POST", f"{srv.url}/v1/chat/completions", json=body) as resp:
+                async with shared_client() as client:
+                    async with client.stream("POST", f"{srv.url}/v1/chat/completions", json=body, timeout=_TIMEOUT) as resp:
                         async for chunk in resp.aiter_bytes():
                             yield chunk
             except httpx.ConnectError:
@@ -79,8 +80,8 @@ async def chat_completions(request: Request) -> StreamingResponse | JSONResponse
         return StreamingResponse(generate(), media_type="text/event-stream")
 
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.post(f"{srv.url}/v1/chat/completions", json=body)
+        async with shared_client() as client:
+            resp = await client.post(f"{srv.url}/v1/chat/completions", json=body, timeout=_TIMEOUT)
     except httpx.ConnectError:
         raise HTTPException(status_code=502, detail={"error": "upstream unreachable"})
     except httpx.TimeoutException:
@@ -104,8 +105,8 @@ async def completions(request: Request) -> StreamingResponse | JSONResponse:
     if stream:
         async def generate() -> AsyncIterator[bytes]:
             try:
-                async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-                    async with client.stream("POST", f"{srv.url}/v1/completions", json=body) as resp:
+                async with shared_client() as client:
+                    async with client.stream("POST", f"{srv.url}/v1/completions", json=body, timeout=_TIMEOUT) as resp:
                         async for chunk in resp.aiter_bytes():
                             yield chunk
             except httpx.ConnectError:
@@ -116,8 +117,8 @@ async def completions(request: Request) -> StreamingResponse | JSONResponse:
         return StreamingResponse(generate(), media_type="text/event-stream")
 
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.post(f"{srv.url}/v1/completions", json=body)
+        async with shared_client() as client:
+            resp = await client.post(f"{srv.url}/v1/completions", json=body, timeout=_TIMEOUT)
     except httpx.ConnectError:
         raise HTTPException(status_code=502, detail={"error": "upstream unreachable"})
     except httpx.TimeoutException:
@@ -138,8 +139,8 @@ async def embeddings(request: Request) -> JSONResponse:
     srv = get_subserver(model)
 
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.post(f"{srv.url}/v1/embeddings", json=body)
+        async with shared_client() as client:
+            resp = await client.post(f"{srv.url}/v1/embeddings", json=body, timeout=_TIMEOUT)
     except httpx.ConnectError:
         raise HTTPException(status_code=502, detail={"error": "upstream unreachable"})
     except httpx.TimeoutException:

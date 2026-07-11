@@ -6,6 +6,7 @@ import signal
 import subprocess
 import time
 from collections import deque
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,8 @@ from fastapi.staticfiles import StaticFiles
 
 from .auth import admin_guard, auth_enabled, check_password, create_session, revoke_session
 from .config import STATIC_DIR, Config
+from .http_client import aclose_client
+from .memtrim import periodic_malloc_trim
 from .hf_routes import router as hf_router
 from .logs import begin_capture, get_last_exit, log_file_path, mark_expected_stop, server_logs
 from .models import ProcessState
@@ -36,7 +39,24 @@ from .runtime import (
     status_for,
 )
 
-app = FastAPI(title="metallama")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Periodically return freed heap to the OS so transient allocations during
+    # inference (JSON parsing, HTTP buffers) don't inflate RSS permanently.
+    trim_task = asyncio.create_task(periodic_malloc_trim(30.0))
+    try:
+        yield
+    finally:
+        trim_task.cancel()
+        try:
+            await trim_task
+        except asyncio.CancelledError:
+            pass
+        await aclose_client()
+
+
+app = FastAPI(title="metallama", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # ---------------------------------------------------------------------------
@@ -341,12 +361,12 @@ async def list_models() -> dict[str, Any]:
     from .unified_config import load_unified_config
     from .ollama.probe import probe_one
     from .ollama.schemas import SubserverConfig
-    import httpx
+    from .http_client import shared_client
 
     managed = await asyncio.gather(*[model_payload(profile) for profile in MODEL_PROFILES.values()])
     cfg = load_unified_config()
     remote = []
-    async with httpx.AsyncClient(timeout=httpx.Timeout(2.0)) as client:
+    async with shared_client() as client:
         for srv_cfg in cfg.remote_servers:
             srv = SubserverConfig(name=srv_cfg.name, url=srv_cfg.url, context_length=srv_cfg.context_length)
             await probe_one(srv, client)
@@ -511,6 +531,7 @@ async def model_slots(model_name: str) -> Any:
     import httpx
 
     from .unified_config import load_unified_config
+    from .http_client import shared_client
 
     # Resolve the upstream /slots URL
     slots_url: str | None = None
@@ -530,8 +551,8 @@ async def model_slots(model_name: str) -> Any:
         slots_url = f"{base}/slots"
 
     try:
-        async with httpx.AsyncClient(timeout=1.5) as client:
-            resp = await client.get(slots_url)
+        async with shared_client() as client:
+            resp = await client.get(slots_url, timeout=1.5)
         if resp.status_code != 200:
             raise HTTPException(status_code=502, detail=f"Upstream returned {resp.status_code}")
         data = resp.json()

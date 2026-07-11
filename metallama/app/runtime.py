@@ -14,6 +14,7 @@ from fastapi import HTTPException
 from .config import Config
 from .gguf import estimate_vram_gb
 from .gpu import get_free_vram_gb
+from .http_client import shared_client
 from .logs import get_unexpected_exit, server_logs
 from .models import ModelProfile, ProcessState
 from .profiles import MODEL_PROFILES
@@ -206,8 +207,8 @@ def build_command(profile: ModelProfile) -> list[str]:
 async def _health_check(port: int) -> bool:
     """Async health check for a llama-server port (non-blocking)."""
     try:
-        async with httpx.AsyncClient(timeout=0.5) as client:
-            resp = await client.get(f"http://127.0.0.1:{port}/health")
+        async with shared_client() as client:
+            resp = await client.get(f"http://127.0.0.1:{port}/health", timeout=0.5)
             return resp.status_code == 200
     except httpx.HTTPError:
         return False
