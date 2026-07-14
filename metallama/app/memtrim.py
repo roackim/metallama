@@ -36,7 +36,7 @@ def malloc_trim() -> None:
             pass
 
 
-async def periodic_malloc_trim(interval: float = 30.0) -> None:
+async def periodic_malloc_trim(interval: float = 20.0) -> None:
     """Periodically release freed heap back to the OS until cancelled."""
     while True:
         await asyncio.sleep(interval)
