@@ -52,6 +52,11 @@ It also handles auth state (login modal, admin toggle) and the binary-missing wa
   is persisted in `localStorage` (`metallama.theme`), defaulting to `system`.
 - **Graphs**: `features/system/index.js` draws VRAM/RAM history on `<canvas>` with
   HiDPI-aware sizing.
+- **Per-GPU VRAM**: `features/system/index.js` renders one toggleable row per GPU
+  (checkbox + live value + mini graph) inside `#vram-gpus`. Untracked GPUs are
+  excluded from the aggregate total. Toggling calls
+  `POST /api/system/vram/gpus/toggle`; the tracked set is persisted server-side in
+  `.metallama_gpu_config.json`.
 
 ## See Also
 - [Architecture](architecture.md)

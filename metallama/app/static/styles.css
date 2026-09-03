@@ -2182,3 +2182,77 @@ body.admin-locked .disabled-readonly {
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+/* ── Per-GPU VRAM tracking ─────────────────────────────── */
+.vram-gpus {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+.vram-gpu {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.vram-gpu-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  cursor: pointer;
+  font-size: 0.78rem;
+}
+.vram-gpu-toggle input[type="checkbox"] {
+  accent-color: var(--blue);
+  cursor: pointer;
+}
+.vram-gpu-name {
+  font-weight: 700;
+  font-family: ui-monospace, monospace;
+  color: var(--text);
+}
+.vram-gpu-val {
+  margin-left: auto;
+  font-family: ui-monospace, monospace;
+  color: var(--muted);
+}
+.vram-gpu-graph {
+  height: 40px;
+}
+
+/* ── Collapsible "Individual GPUs" section ─────────────── */
+.vram-gpus-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  margin: 0.4rem 0 0.3rem;
+  padding: 0.3rem 0.4rem;
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--border, rgba(128, 128, 128, 0.25));
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  text-align: left;
+}
+.vram-gpus-toggle:hover {
+  color: var(--text);
+}
+.vram-gpus-toggle-caret {
+  display: inline-block;
+  width: 0.9em;
+  transition: transform 0.15s ease;
+}
+.vram-gpus.collapsed {
+  display: none;
+}
+.vram-gpu.untracked {
+  opacity: 0.55;
+}
+.vram-gpu.untracked .vram-gpu-graph {
+  display: none;
+}

@@ -656,11 +656,24 @@ function updateLogPanel(modelId) {
   const pre = panel.querySelector(".log-output");
   const st = logState.get(modelId);
   if (!pre || !st) return;
+
+  // Remember whether the user is pinned to the bottom BEFORE we replace the
+  // text. Setting textContent resets scrollTop to 0, so we must re-apply the
+  // scroll position afterwards — otherwise the panel jumps to the top.
+  const wasPinned = st.pinned !== false;
+  const prevScrollTop = pre.scrollTop;
+
   pre.textContent = st.text || "(no output yet)";
   pre.onscroll = () => {
     st.pinned = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 8;
   };
-  if (st.pinned !== false) pre.scrollTop = pre.scrollHeight;
+
+  if (wasPinned) {
+    pre.scrollTop = pre.scrollHeight;
+  } else {
+    // Preserve the user's scroll position across a text update.
+    pre.scrollTop = prevScrollTop;
+  }
 }
 
 function hydrateLogPanels() {
@@ -940,14 +953,24 @@ async function waitForStop(modelId) {
   throw new Error("Timed out waiting for server to stop (30s).");
 }
 
-// After a start request, only wait until the process is up ("starting" or
+// After a start request, wait until the process is up ("starting" or
 // "online"). Model loading can take minutes; the card's loading strip tracks
 // it, and a crash surfaces through the unexpected-exit banner.
+// If the process crashes during startup (status returns to "offline"), bail
+// out immediately so the loading overlay/blur clears right away instead of
+// lingering for the full poll window.
 async function waitForSpawn(modelId) {
+  let sawTransition = false;
   for (let i = 0; i < 10; i++) {
     await sleep(500);
     const data = await api(`/api/models/${modelId}/status`);
-    if (data.status !== "offline") return;
+    if (data.status === "online" || data.status === "starting") {
+      sawTransition = true;
+      if (data.status === "online") return;
+      continue;
+    }
+    // offline: if we already saw it start, it crashed — stop waiting now.
+    if (sawTransition) return;
   }
 }
 

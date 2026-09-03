@@ -18,9 +18,11 @@ and an OpenAI-compatible gateway (`/ollama/v1/*`). Mutating endpoints are guarde
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/health` | Binary availability + auth-enabled status |
-| GET | `/api/system/vram` | Current VRAM usage (aggregated across GPUs) |
+| GET | `/api/system/vram` | Current VRAM usage. Each GPU annotated with `tracked`; aggregate sums only tracked GPUs |
 | GET | `/api/system/ram` | Current RAM usage (psutil) |
-| GET | `/api/system/vram/history` | VRAM history (500 samples) |
+| GET | `/api/system/vram/gpus` | List available GPUs with their `tracked` state |
+| POST | `/api/system/vram/gpus/toggle` | Toggle whether a GPU is tracked (persisted in `.metallama_gpu_config.json`) |
+| GET | `/api/system/vram/history` | VRAM history (500 samples) + per-GPU history under `gpus`. The aggregate `history` is computed on-demand from the per-GPU histories of currently-tracked GPUs, so untracking a GPU also removes its past data from the total |
 | GET | `/api/system/ram/history` | RAM history (500 samples) |
 | GET | `/api/ports/suggest` | Suggest a free port |
 

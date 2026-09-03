@@ -2,16 +2,43 @@ import { api } from "../../core/api.js";
 
 const vramStatusEl = document.getElementById("vram-status");
 const vramGraphEl = document.getElementById("vram-graph");
+const vramGpusEl = document.getElementById("vram-gpus");
+const vramGpusToggleEl = document.getElementById("vram-gpus-toggle");
 const ramStatusEl = document.getElementById("ram-status");
 const ramGraphEl = document.getElementById("ram-graph");
+
+// Per-GPU graph state: gpuId -> { canvas, history }
+const gpuGraphs = new Map();
+// GPU palette (cycled per GPU index)
+const GPU_COLORS = [
+  { line: "#60a5fa", fill: "rgba(96, 165, 250, 0.12)" },
+  { line: "#34d399", fill: "rgba(52, 211, 153, 0.12)" },
+  { line: "#fbbf24", fill: "rgba(251, 191, 36, 0.12)" },
+  { line: "#f472b6", fill: "rgba(244, 114, 182, 0.12)" },
+  { line: "#a78bfa", fill: "rgba(167, 139, 250, 0.12)" },
+  { line: "#f87171", fill: "rgba(248, 113, 113, 0.12)" },
+];
+
+// Collapsible "Individual GPUs" section. Persisted in localStorage.
+const GPUS_SECTION_KEY = "metallama.gpusSectionOpen";
+function isGpusSectionOpen() {
+  return localStorage.getItem(GPUS_SECTION_KEY) !== "0";
+}
+function setGpusSectionOpen(open) {
+  localStorage.setItem(GPUS_SECTION_KEY, open ? "1" : "0");
+  if (vramGpusToggleEl) {
+    vramGpusToggleEl.setAttribute("aria-expanded", open ? "true" : "false");
+    const caret = vramGpusToggleEl.querySelector(".vram-gpus-toggle-caret");
+    if (caret) caret.textContent = open ? "▾" : "▸";
+  }
+  if (vramGpusEl) vramGpusEl.classList.toggle("collapsed", !open);
+}
 
 function drawGraph(canvas, history, colors) {
   if (!canvas || !history || history.length < 2) {
     return;
   }
 
-  // Size the backing store to the displayed size × devicePixelRatio,
-  // so the canvas is crisp on HiDPI displays and not stretched/blurry.
   const dpr = window.devicePixelRatio || 1;
   const rect = canvas.getBoundingClientRect();
   const cssW = Math.max(1, Math.floor(rect.width));
@@ -86,6 +113,62 @@ function drawRamGraph(history) {
   drawGraph(ramGraphEl, history, colors);
 }
 
+// Render the per-GPU toggle list + graphs. Called when the GPU set changes.
+// Tracked GPUs come first (with their graph); untracked GPUs are moved to the
+// bottom with their graph hidden.
+function renderGpuList(gpus) {
+  if (!vramGpusEl) return;
+  const seen = new Set(gpus.map((g) => g.id));
+  for (const [id, entry] of gpuGraphs) {
+    if (!seen.has(id)) {
+      entry.canvas.remove();
+      gpuGraphs.delete(id);
+    }
+  }
+
+  // Sort: tracked first (stable), untracked at the bottom.
+  const sorted = [...gpus].sort((a, b) => Number(b.tracked) - Number(a.tracked));
+
+  vramGpusEl.innerHTML = sorted
+    .map((gpu, i) => {
+      const colors = GPU_COLORS[i % GPU_COLORS.length];
+      return `
+        <div class="vram-gpu ${gpu.tracked ? "" : "untracked"}" data-gpu-id="${gpu.id}">
+          <label class="vram-gpu-toggle" title="${gpu.tracked ? "Click to stop tracking this GPU" : "Click to track this GPU"}">
+            <input type="checkbox" data-gpu-id="${gpu.id}" ${gpu.tracked ? "checked" : ""} />
+            <span class="vram-gpu-name">${gpu.id}</span>
+            <span class="vram-gpu-val">${gpu.used_gb.toFixed(1)} / ${gpu.total_gb.toFixed(1)} GB</span>
+          </label>
+          <canvas class="system-graph vram-gpu-graph" width="400" height="40"></canvas>
+        </div>
+      `;
+    })
+    .join("");
+
+  vramGpusEl.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+    cb.addEventListener("change", async () => {
+      const id = cb.dataset.gpuId;
+      try {
+        await api("/api/system/vram/gpus/toggle", {
+          method: "POST",
+          body: JSON.stringify({ id }),
+        });
+        await refreshVram();
+        await refreshVramGraph();
+      } catch (err) {
+        cb.checked = !cb.checked;
+        console.error("toggle failed", err);
+      }
+    });
+  });
+
+  vramGpusEl.querySelectorAll(".vram-gpu").forEach((row) => {
+    const id = row.dataset.gpuId;
+    const canvas = row.querySelector(".vram-gpu-graph");
+    gpuGraphs.set(id, { canvas, history: [] });
+  });
+}
+
 export async function refreshVram() {
   if (!vramStatusEl) {
     return;
@@ -95,14 +178,31 @@ export async function refreshVram() {
     const data = await api("/api/system/vram");
     if (!data.available || !data.gpus || data.gpus.length === 0) {
       vramStatusEl.textContent = "N/A";
+      if (vramGpusEl) vramGpusEl.innerHTML = "";
       return;
     }
 
-    const totalUsed = data.gpus.reduce((sum, gpu) => sum + gpu.used_gb, 0);
-    const totalMax = data.gpus.reduce((sum, gpu) => sum + gpu.total_gb, 0);
-    const avgPercent = data.gpus.reduce((sum, gpu) => sum + gpu.percent, 0) / data.gpus.length;
+    const tracked = data.gpus.filter((g) => g.tracked);
+    const pool = tracked.length ? tracked : data.gpus;
+    const totalUsed = pool.reduce((sum, gpu) => sum + gpu.used_gb, 0);
+    const totalMax = pool.reduce((sum, gpu) => sum + gpu.total_gb, 0);
+    const avgPercent = totalMax > 0 ? (totalUsed / totalMax) * 100 : 0;
 
     vramStatusEl.textContent = `${totalUsed.toFixed(1)} / ${totalMax.toFixed(1)} GB · ${avgPercent.toFixed(0)}%`;
+
+    const sig = data.gpus.map((g) => `${g.id}:${g.tracked}`).join("|");
+    if (vramGpusEl && vramGpusEl.dataset.sig !== sig) {
+      vramGpusEl.dataset.sig = sig;
+      renderGpuList(data.gpus);
+    } else if (vramGpusEl) {
+      data.gpus.forEach((gpu) => {
+        const row = vramGpusEl.querySelector(`.vram-gpu[data-gpu-id="${gpu.id}"]`);
+        if (row) {
+          const val = row.querySelector(".vram-gpu-val");
+          if (val) val.textContent = `${gpu.used_gb.toFixed(1)} / ${gpu.total_gb.toFixed(1)} GB`;
+        }
+      });
+    }
   } catch {
     vramStatusEl.textContent = "--";
   }
@@ -132,6 +232,16 @@ export async function refreshVramGraph() {
     if (data.history && data.history.length > 0) {
       drawVramGraph(data.history);
     }
+    const gpuHist = data.gpus || {};
+    const ids = [...gpuGraphs.keys()];
+    for (const [id, entry] of gpuGraphs) {
+      const hist = gpuHist[id] || [];
+      if (hist.length > 0) {
+        const idx = ids.indexOf(id);
+        const colors = GPU_COLORS[idx % GPU_COLORS.length];
+        drawGraph(entry.canvas, hist, colors);
+      }
+    }
   } catch {
     // Ignore graph refresh failures.
   }
@@ -146,4 +256,12 @@ export async function refreshRamGraph() {
   } catch {
     // Ignore graph refresh failures.
   }
+}
+
+// Wire up the collapsible "Individual GPUs" section.
+if (vramGpusToggleEl) {
+  vramGpusToggleEl.addEventListener("click", () => {
+    setGpusSectionOpen(!isGpusSectionOpen());
+  });
+  setGpusSectionOpen(isGpusSectionOpen());
 }

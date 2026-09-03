@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import signal
 import subprocess
@@ -70,8 +71,46 @@ app.include_router(hf_router)
 
 # Server-side history storage (500 samples at 1s = ~8 minutes)
 MAX_HISTORY_SAMPLES = 500
-vram_history: deque[dict[str, Any]] = deque(maxlen=MAX_HISTORY_SAMPLES)
 ram_history: deque[dict[str, Any]] = deque(maxlen=MAX_HISTORY_SAMPLES)
+
+# Per-GPU VRAM history, keyed by GPU id (e.g. "card0", "gpu0").
+# The aggregate total graph is derived from these on-demand (see
+# get_vram_history), so it only reflects currently-tracked GPUs.
+vram_gpu_history: dict[str, deque[dict[str, Any]]] = {}
+
+# Which GPUs are tracked (persisted). Default: all.
+_GPU_CONFIG_PATH = Path(__file__).resolve().parents[2] / ".metallama_gpu_config.json"
+
+
+def _load_gpu_config() -> dict[str, Any]:
+    try:
+        return json.loads(_GPU_CONFIG_PATH.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_gpu_config(cfg: dict[str, Any]) -> None:
+    try:
+        _GPU_CONFIG_PATH.write_text(json.dumps(cfg, indent=2))
+    except OSError:
+        pass
+
+
+# Tracked = all GPUs except those explicitly excluded. This keeps the default
+# "track everything" behavior while letting the user opt specific GPUs out
+# (e.g. an iGPU).
+def _excluded_gpu_ids() -> set[str]:
+    return set(_load_gpu_config().get("excluded_gpus", []))
+
+
+def _set_excluded_gpu_ids(ids: set[str]) -> None:
+    cfg = _load_gpu_config()
+    cfg["excluded_gpus"] = sorted(ids)
+    _save_gpu_config(cfg)
+
+
+def _is_gpu_tracked(gid: str) -> bool:
+    return gid not in _excluded_gpu_ids()
 
 
 def _iso_mtime(st: os.stat_result) -> str | None:
@@ -145,19 +184,98 @@ def get_vram_status() -> dict[str, Any]:
     payload = vram_status()
     gpus = payload.get("gpus") or []
 
-    # Store in history (aggregate across GPUs)
+    # Store per-GPU history. The aggregate total graph is computed on-demand
+    # from the per-GPU histories of currently-tracked GPUs (see
+    # get_vram_history), so untracking a GPU also removes its past data from
+    # the total graph.
+    excluded = _excluded_gpu_ids()
     if gpus:
-        total_used = sum(gpu["used_gb"] for gpu in gpus)
-        total_max = sum(gpu["total_gb"] for gpu in gpus)
-        avg_percent = sum(gpu["percent"] for gpu in gpus) / len(gpus)
-        vram_history.append({
-            "timestamp": int(time.time() * 1000),
-            "percent": round(avg_percent, 1),
+        for gpu in gpus:
+            gid = gpu.get("id", "")
+            if gid:
+                hist = vram_gpu_history.setdefault(gid, deque(maxlen=MAX_HISTORY_SAMPLES))
+                hist.append({
+                    "timestamp": int(time.time() * 1000),
+                    "percent": gpu["percent"],
+                    "used_gb": gpu["used_gb"],
+                    "total_gb": gpu["total_gb"],
+                })
+
+    # Annotate each GPU with whether it's tracked.
+    for gpu in gpus:
+        gpu["tracked"] = gpu.get("id", "") not in excluded
+
+    return payload
+
+
+@app.get("/api/system/vram/gpus")
+def get_vram_gpus() -> dict[str, Any]:
+    """List available GPUs with their tracked state."""
+    from .gpu import vram_status
+
+    payload = vram_status()
+    gpus = payload.get("gpus") or []
+    excluded = _excluded_gpu_ids()
+    for gpu in gpus:
+        gpu["tracked"] = gpu.get("id", "") not in excluded
+    return {"available": payload.get("available", False), "tool": payload.get("tool"), "gpus": gpus}
+
+
+@app.post("/api/system/vram/gpus/toggle")
+def toggle_vram_gpu(payload: dict[str, Any] = Body(...), _guard: None = Depends(admin_guard)) -> dict[str, Any]:
+    """Toggle whether a GPU is tracked. Persisted across restarts."""
+    gpu_id = payload.get("id", "")
+    if not gpu_id:
+        raise HTTPException(status_code=400, detail="id is required")
+    excluded = _excluded_gpu_ids()
+    if gpu_id in excluded:
+        excluded.discard(gpu_id)
+        enabled = True
+    else:
+        excluded.add(gpu_id)
+        enabled = False
+    _set_excluded_gpu_ids(excluded)
+    return {"ok": True, "id": gpu_id, "tracked": enabled}
+
+
+@app.get("/api/system/vram/history")
+def get_vram_history() -> dict[str, Any]:
+    """Get VRAM usage history.
+
+    `gpus` holds per-GPU history. `history` is the aggregate total computed
+    on-demand from the per-GPU histories of the currently-tracked GPUs, aligned
+    by timestamp. Untracking a GPU therefore removes its past data from the
+    total graph too.
+    """
+    excluded = _excluded_gpu_ids()
+    tracked_ids = [gid for gid in vram_gpu_history if gid not in excluded]
+
+    # Build a timestamp -> list of (used_gb, total_gb) map for tracked GPUs.
+    by_ts: dict[int, list[tuple[float, float]]] = {}
+    for gid in tracked_ids:
+        for sample in vram_gpu_history[gid]:
+            by_ts.setdefault(sample["timestamp"], []).append(
+                (sample["used_gb"], sample["total_gb"])
+            )
+
+    aggregate = []
+    for ts in sorted(by_ts):
+        samples = by_ts[ts]
+        total_used = sum(s[0] for s in samples)
+        total_max = sum(s[1] for s in samples)
+        if total_max <= 0:
+            continue
+        aggregate.append({
+            "timestamp": ts,
+            "percent": round(total_used / total_max * 100, 1),
             "used_gb": round(total_used, 2),
             "total_gb": round(total_max, 2),
         })
 
-    return payload
+    return {
+        "history": aggregate,
+        "gpus": {gid: list(hist) for gid, hist in vram_gpu_history.items()},
+    }
 
 
 @app.get("/api/system/ram")
@@ -188,12 +306,6 @@ def get_ram_status() -> dict[str, Any]:
         return {"error": "psutil not installed", "available": False}
     except Exception as exc:
         return {"error": str(exc), "available": False}
-
-
-@app.get("/api/system/vram/history")
-def get_vram_history() -> dict[str, Any]:
-    """Get VRAM usage history."""
-    return {"history": list(vram_history)}
 
 
 @app.get("/api/system/ram/history")
