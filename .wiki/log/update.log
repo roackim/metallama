@@ -1,0 +1,13 @@
+[2026-09-03T11:00:00Z] CREATED .wiki/ — initial wiki bootstrap (AGENT.md, tree/, notes/, log/)
+[2026-09-03T11:00:00Z] CREATED tree/app.md — metallama/app backend modules
+[2026-09-03T11:00:00Z] CREATED tree/app-ollama.md — ollama gateway internals
+[2026-09-03T11:00:00Z] CREATED tree/app-ollama-routes.md — ollama/openai HTTP routes
+[2026-09-03T11:00:00Z] CREATED tree/static-js-core.md — frontend core utilities
+[2026-09-03T11:00:00Z] CREATED tree/static-js-features.md — frontend feature modules
+[2026-09-03T11:00:00Z] CREATED tree/static.md — static assets
+[2026-09-03T11:00:00Z] CREATED tree/root.md — repo root scripts/config/docs
+[2026-09-03T11:00:00Z] CREATED notes/architecture.md — system overview, layers, data flows
+[2026-09-03T11:00:00Z] CREATED notes/config.md — env vars, config.yaml, defaults
+[2026-09-03T11:00:00Z] CREATED notes/security.md — auth model, trust boundaries, secrets
+[2026-09-03T11:00:00Z] CREATED notes/api.md — REST + Ollama/OpenAI API surface
+[2026-09-03T11:00:00Z] CREATED notes/frontend.md — frontend structure and patterns
