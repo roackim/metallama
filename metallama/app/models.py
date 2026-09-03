@@ -15,6 +15,7 @@ class ModelProfile:
     context_window: int | None = None
     parallel: int = 1
     model_draft: str | Path | None = None
+    mmproj: str | Path | None = None
 
 
 @dataclass

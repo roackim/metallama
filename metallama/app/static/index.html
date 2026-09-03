@@ -75,9 +75,21 @@
           <div id="models" class="models-list"></div>
           <p id="models-filter-empty" class="library-empty is-hidden">No servers match the current filter.</p>
         </section>
+
+        <section class="main-panel" id="library-panel">
+          <div class="panel-head">
+            <div class="panel-head-left">
+              <h2 class="side-title">Model Library</h2>
+            </div>
+          </div>
+          <div id="library-downloading" class="library-downloading is-hidden"></div>
+          <h3 id="library-list-title" class="side-subtitle is-hidden">Downloaded models</h3>
+          <div id="library-list" class="library-list"></div>
+          <p id="library-empty" class="library-empty is-hidden">No models downloaded yet — search HuggingFace to get started.</p>
+        </section>
       </section>
 
-      <aside class="side-col" id="library-panel">
+      <aside class="side-col">
         <section class="side-panel">
           <h2 class="side-title">System</h2>
           <div class="system-metric">
@@ -94,14 +106,6 @@
             </div>
             <canvas id="vram-graph" class="system-graph" width="400" height="60"></canvas>
           </div>
-        </section>
-
-        <section class="side-panel">
-          <h2 class="side-title">Model Library</h2>
-          <div id="library-downloading" class="library-downloading is-hidden"></div>
-          <h3 id="library-list-title" class="side-subtitle is-hidden">Downloaded models</h3>
-          <div id="library-list" class="library-list"></div>
-          <p id="library-empty" class="library-empty is-hidden">No models downloaded yet — search HuggingFace to get started.</p>
         </section>
       </aside>
     </main>
@@ -145,6 +149,11 @@
                 <p id="edit-model-draft-warning" class="model-not-found-warning is-hidden"></p>
               </div>
               <div class="form-group managed-only">
+                <label for="edit-mmproj">mmproj (Optional)</label>
+                <select id="edit-mmproj"></select>
+                <p id="edit-mmproj-warning" class="model-not-found-warning is-hidden"></p>
+              </div>
+              <div class="form-group managed-only">
                 <label for="edit-port">Port</label>
                 <input type="number" id="edit-port" min="1024" max="65535" />
               </div>
@@ -169,6 +178,45 @@
           <button class="btn-danger" data-action="modal-delete" id="modal-delete-btn" style="margin-right: auto;">Delete</button>
           <button class="btn-secondary" data-action="modal-cancel">Cancel</button>
           <button class="btn-primary" data-action="modal-save">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Restart-on-save warning modal -->
+    <div id="restart-modal" class="modal-overlay is-hidden">
+      <div class="modal-dialog" style="max-width: 520px;">
+        <div class="modal-header">
+          <h2>Server is running</h2>
+          <button class="modal-close" data-action="restart-close" title="Close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="form-hint" style="margin-bottom: 0.5rem;">
+            This server is currently running. Saving the config will only take effect
+            after a restart. How would you like to proceed?
+          </p>
+          <div class="form-group">
+            <label>Restart option</label>
+            <div class="restart-options">
+              <label class="restart-option">
+                <input type="radio" name="restart-option" value="now" checked />
+                <span>
+                  <strong>Restart now</strong>
+                  <small>Stop and restart immediately. In-flight requests will be interrupted.</small>
+                </span>
+              </label>
+              <label class="restart-option">
+                <input type="radio" name="restart-option" value="when_free" />
+                <span>
+                  <strong>Restart when free</strong>
+                  <small>Save now, restart once no slots are occupied (no interruption).</small>
+                </span>
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" data-action="restart-cancel">Cancel</button>
+          <button class="btn-primary" data-action="restart-confirm">Save &amp; Restart</button>
         </div>
       </div>
     </div>

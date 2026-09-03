@@ -74,6 +74,14 @@ vram_history: deque[dict[str, Any]] = deque(maxlen=MAX_HISTORY_SAMPLES)
 ram_history: deque[dict[str, Any]] = deque(maxlen=MAX_HISTORY_SAMPLES)
 
 
+def _iso_mtime(st: os.stat_result) -> str | None:
+    """Return a file's mtime as an ISO-8601 string (local time), or None."""
+    try:
+        return time.strftime("%Y-%m-%d %H:%M", time.localtime(st.st_mtime))
+    except (OSError, ValueError):
+        return None
+
+
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(str(STATIC_DIR / "index.html"))
@@ -226,17 +234,19 @@ def model_library() -> dict[str, Any]:
     cfg = load_unified_config()
     used_by: dict[str, list[str]] = {}
     for server in cfg.managed_servers:
-        for p in (server.model_path, server.model_draft):
-            if p:
+        for field in ("model_path", "model_draft", "mmproj"):
+            val = getattr(server, field, None)
+            if val and isinstance(val, Path):
                 try:
-                    used_by.setdefault(str(Path(p).resolve()), []).append(server.name)
+                    used_by.setdefault(str(val.resolve()), []).append(server.name)
                 except OSError:
                     pass
 
     models = []
-    for p in sorted(models_path.rglob("*.gguf")):
+    for p in sorted(models_path.rglob("*.gguf"), key=lambda f: f.stat().st_mtime, reverse=True):
         try:
-            size = p.stat().st_size
+            st = p.stat()
+            size = st.st_size
         except OSError:
             continue
         meta = read_metadata(p) or {}
@@ -249,6 +259,7 @@ def model_library() -> dict[str, Any]:
             "arch": meta.get("general.architecture"),
             "params": meta.get("general.size_label"),
             "servers": used_by.get(str(p.resolve()), []),
+            "downloaded_at": _iso_mtime(st),
         })
 
     partials = []
@@ -257,6 +268,7 @@ def model_library() -> dict[str, Any]:
         total = completed = 0
         repo_id = hf_filename = None
         try:
+            st = p.stat()
             if meta_path.exists():
                 raw = _json.loads(meta_path.read_text())
                 total = int(raw.get("total", 0))
@@ -271,9 +283,9 @@ def model_library() -> dict[str, Any]:
                     if int(i) < n_blocks
                 )
             else:
-                completed = p.stat().st_size  # legacy contiguous partial
+                completed = st.st_size  # legacy contiguous partial
         except (OSError, ValueError):
-            pass
+            continue
         partials.append({
             "name": p.name.removesuffix(".partial").removesuffix(".gguf"),
             "rel_path": str(p.relative_to(models_path)),
@@ -282,6 +294,7 @@ def model_library() -> dict[str, Any]:
             "percent": round(completed / total * 100, 1) if total else None,
             "repo_id": repo_id,
             "filename": hf_filename,
+            "downloaded_at": _iso_mtime(st),
         })
 
     return {"models": models, "partials": partials, "models_dir": str(models_path)}
@@ -341,6 +354,107 @@ def delete_library_model(payload: dict[str, Any] = Body(...), _guard: None = Dep
 
     target.unlink()
     return {"ok": True, "deleted": rel_path}
+
+
+def _resolve_in_models_dir(rel_path: str, allowed_suffixes: set[str]) -> Path:
+    """Resolve *rel_path* inside the models dir, guarding against traversal.
+
+    Returns the resolved absolute path. Raises HTTPException on any violation.
+    """
+    models_dir = Config.MODELS_DIR
+    if not models_dir:
+        raise HTTPException(status_code=400, detail="METALLAMA_MODELS_DIR is not set")
+    models_path = Path(models_dir).resolve()
+    target = (models_path / rel_path).resolve()
+    try:
+        common = os.path.commonpath([str(models_path), str(target)])
+    except ValueError:
+        raise HTTPException(status_code=400, detail="rel_path escapes the models directory")
+    if common != str(models_path):
+        raise HTTPException(status_code=400, detail="rel_path escapes the models directory")
+    if target.suffix not in allowed_suffixes:
+        raise HTTPException(status_code=400, detail=f"rel_path must point to a {sorted(allowed_suffixes)} file")
+    return target
+
+
+@app.post("/api/library/models/rename")
+def rename_library_model(payload: dict[str, Any] = Body(...), _guard: None = Depends(admin_guard)) -> dict[str, Any]:
+    """Rename a GGUF model file in the models directory.
+
+    Also updates any managed server configs that reference the old path so
+    they keep pointing at the renamed file.
+    """
+    rel_path = payload.get("rel_path", "")
+    new_name = payload.get("new_name", "")
+    if not rel_path or not isinstance(rel_path, str):
+        raise HTTPException(status_code=400, detail="rel_path is required")
+    if not new_name or not isinstance(new_name, str) or not new_name.strip():
+        raise HTTPException(status_code=400, detail="new_name is required")
+    new_name = new_name.strip()
+
+    target = _resolve_in_models_dir(rel_path, {".gguf"})
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="Model file not found")
+
+    # New name must be a bare filename (no path separators) to keep it simple
+    # and avoid traversal via the new name.
+    if "/" in new_name or "\\" in new_name or new_name in (".", ".."):
+        raise HTTPException(status_code=400, detail="new_name must be a plain filename")
+    if not new_name.lower().endswith(".gguf"):
+        new_name += ".gguf"
+    new_path = target.with_name(new_name)
+    if new_path.exists():
+        raise HTTPException(status_code=409, detail=f"A file named '{new_name}' already exists")
+
+    old_abs = str(target.resolve())
+    target.rename(new_path)
+
+    # Update managed server configs that referenced the old path.
+    from .unified_config import load_unified_config, update_managed_server
+
+    cfg = load_unified_config()
+    for server in cfg.managed_servers:
+        for field in ("model_path", "model_draft", "mmproj"):
+            val = getattr(server, field, None)
+            if val and str(Path(val).resolve()) == old_abs:
+                try:
+                    update_managed_server(server.name, {field: str(new_path)})
+                except ValueError:
+                    pass
+
+    return {"ok": True, "renamed": rel_path, "to": str(new_path)}
+
+
+@app.post("/api/library/partials/rename")
+def rename_partial(payload: dict[str, Any] = Body(...), _guard: None = Depends(admin_guard)) -> dict[str, Any]:
+    """Rename a .partial download file (and its .meta sidecar)."""
+    rel_path = payload.get("rel_path", "")
+    new_name = payload.get("new_name", "")
+    if not rel_path or not isinstance(rel_path, str):
+        raise HTTPException(status_code=400, detail="rel_path is required")
+    if not new_name or not isinstance(new_name, str) or not new_name.strip():
+        raise HTTPException(status_code=400, detail="new_name is required")
+    new_name = new_name.strip()
+
+    target = _resolve_in_models_dir(rel_path, {".partial"})
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="Partial file not found")
+
+    if "/" in new_name or "\\" in new_name or new_name in (".", ".."):
+        raise HTTPException(status_code=400, detail="new_name must be a plain filename")
+    if not new_name.lower().endswith(".partial"):
+        new_name += ".partial"
+    new_path = target.with_name(new_name)
+    if new_path.exists():
+        raise HTTPException(status_code=409, detail=f"A file named '{new_name}' already exists")
+
+    meta = target.with_name(target.name + ".meta")
+    target.rename(new_path)
+    if meta.exists():
+        new_meta = new_path.with_name(new_path.name + ".meta")
+        meta.rename(new_meta)
+
+    return {"ok": True, "renamed": rel_path, "to": str(new_path)}
 
 
 @app.get("/api/model-files")
@@ -693,6 +807,91 @@ def model_command_preview(model_id: str) -> dict[str, Any]:
     }
 
 
+async def _wait_for_free_slots(model_name: str, timeout: float = 3600.0) -> None:
+    """Wait until the server has no occupied slots (or it goes offline).
+
+    Polls the upstream /slots endpoint. Used for "restart when free" so a
+    config change doesn't interrupt an in-flight generation.
+    """
+    import httpx
+
+    from .http_client import shared_client
+
+    profile = MODEL_PROFILES.get(model_name)
+    if not profile:
+        return
+    slots_url = f"http://127.0.0.1:{profile.port}/slots"
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        # If the server stopped on its own, nothing to wait for.
+        if not is_alive(runtime_processes.get(model_name).process) if runtime_processes.get(model_name) else True:
+            return
+        try:
+            async with shared_client() as client:
+                resp = await client.get(slots_url, timeout=1.5)
+            if resp.status_code == 200:
+                data = resp.json()
+                if isinstance(data, list):
+                    busy = any(s.get("is_processing") for s in data if isinstance(s, dict))
+                    if not busy:
+                        return
+        except (httpx.ConnectError, httpx.TimeoutException):
+            return
+        await asyncio.sleep(2.0)
+
+
+async def _restart_model(model_name: str) -> None:
+    """Stop and restart a managed server (used after a config change)."""
+    from .profiles import reload_model_profiles
+
+    # Stop
+    async with model_locks.setdefault(model_name, asyncio.Lock()):
+        cleanup_dead(model_name)
+        state = runtime_processes.get(model_name)
+        if state and is_alive(state.process):
+            mark_expected_stop(model_name)
+            state.process.terminate()
+            for _ in range(20):
+                if not is_alive(state.process):
+                    break
+                await asyncio.sleep(0.25)
+            if is_alive(state.process):
+                state.process.kill()
+        runtime_processes.pop(model_name, None)
+
+    # Reload profiles so the new config is used for the launch command.
+    reload_model_profiles()
+
+    # Start
+    profile = MODEL_PROFILES.get(model_name)
+    if not profile:
+        return
+    async with model_locks.setdefault(model_name, asyncio.Lock()):
+        cleanup_dead(model_name)
+        if is_port_open("127.0.0.1", profile.port):
+            # Port still in use (e.g. lingering process) — skip auto-restart.
+            return
+        command = build_command(profile)
+        try:
+            proc = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                errors="replace",
+                bufsize=1,
+            )
+        except FileNotFoundError:
+            return
+        begin_capture(model_name, proc)
+        runtime_processes[model_name] = ProcessState(
+            process=proc,
+            started_at=time.time(),
+            command=command,
+        )
+
+
 @app.post("/api/models/{model_name}/config")
 async def update_model_config(model_name: str, payload: dict[str, Any] = Body(...), _guard: None = Depends(admin_guard)) -> dict[str, Any]:
     from .profiles import reload_model_profiles
@@ -702,11 +901,15 @@ async def update_model_config(model_name: str, payload: dict[str, Any] = Body(..
     if not profile:
         raise HTTPException(status_code=404, detail="Unknown model")
 
-    # Check if server is running - only allow changes when stopped
+    # restart: None (default) → reject if running; "now" → save + restart immediately;
+    # "when_free" → save + restart once no slots are occupied.
+    restart = payload.get("restart")
+
     async with model_locks.setdefault(model_name, asyncio.Lock()):
         cleanup_dead(model_name)
         state = runtime_processes.get(model_name)
-        if state and is_alive(state.process):
+        running = bool(state and is_alive(state.process))
+        if running and restart not in ("now", "when_free"):
             raise HTTPException(status_code=409, detail="Cannot change config while server is running")
     
     updates: dict[str, Any] = {}
@@ -760,18 +963,33 @@ async def update_model_config(model_name: str, payload: dict[str, Any] = Body(..
             raise HTTPException(status_code=400, detail="model_draft must be a string")
         updates["model_draft"] = mtp.strip()
 
+    # Validate and collect mmproj if provided
+    if "mmproj" in payload:
+        mmproj = payload["mmproj"]
+        if not isinstance(mmproj, str):
+            raise HTTPException(status_code=400, detail="mmproj must be a string")
+        updates["mmproj"] = mmproj.strip()
+
     if updates:
         # Update config.yaml (machine-managed section)
         update_managed_server(model_name, updates)
         # Reload profiles from disk so changes take effect immediately
         reload_model_profiles()
         rebuild_ollama_registry()
-    
+
+    # If the server was running and a restart was requested, restart it now
+    # (or wait for slots to free up first).
+    if running and restart in ("now", "when_free"):
+        if restart == "when_free":
+            await _wait_for_free_slots(model_name)
+        await _restart_model(model_name)
+
     # Return updated config from unified config
     unified = load_unified_config()
     server_entry = next((s for s in unified.managed_servers if s.name == model_name), None)
     return {
         "ok": True,
+        "restarted": bool(running and restart in ("now", "when_free")),
         "config": {
             "context_window": server_entry.context_window,
             "parallel": server_entry.parallel,

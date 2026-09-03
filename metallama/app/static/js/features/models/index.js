@@ -22,6 +22,7 @@ const SLOT_REFRESH_INTERVAL = 5000; // ms — avoid hammering /slots during infe
 // ── Edit Modal State ──────────────────────────────────────
 let editingModelId = null;
 let editingIsManaged = true;
+let editingWasRunning = false; // whether the server was online when the edit modal opened
 let modalMode = "edit"; // "edit" or "create"
 let modelFilesCache = null;
 let modelsDirCache = "";
@@ -68,17 +69,18 @@ function populateModelSelector(files, currentPath) {
   });
 
   if (!found && currentPath) {
-    // Prepend current (missing) model so user sees what's selected
     const opt = document.createElement("option");
     opt.value = currentPath;
     opt.textContent = `${normalizedCurrent} (not found)`;
     opt.selected = true;
     opt.style.color = "#ef4444";
     select.appendChild(opt);
-    warning.textContent = `⚠ Model file not found locally: ${normalizedCurrent}`;
-    warning.classList.remove("is-hidden");
+    if (warning) {
+      warning.textContent = `⚠ ${label} file not found locally: ${normalizedCurrent}`;
+      warning.classList.remove("is-hidden");
+    }
   } else {
-    warning.classList.add("is-hidden");
+    if (warning) warning.classList.add("is-hidden");
   }
 
   files.forEach((f) => {
@@ -97,7 +99,7 @@ function populateModelSelector(files, currentPath) {
     const isMissing = select.selectedOptions[0]?.textContent.endsWith("(not found)");
     if (isMissing) {
       const fname = val.replace(/^.*[\\/]/, "");
-      warning.textContent = `⚠ Model file not found locally: ${fname}`;
+      warning.textContent = `⚠ ${label} file not found locally: ${fname}`;
       warning.classList.remove("is-hidden");
     } else {
       warning.classList.add("is-hidden");
@@ -105,11 +107,12 @@ function populateModelSelector(files, currentPath) {
   };
 }
 
-function populateModelDraftSelector(files, currentPath) {
-  const select = document.getElementById("edit-model-draft");
+function populateModelDraftSelector(files, currentPath, selectId = "edit-model-draft") {
+  const select = document.getElementById(selectId);
   select.innerHTML = "";
 
-  const warning = document.getElementById("edit-model-draft-warning");
+  const warning = document.getElementById(selectId + "-warning");
+  const label = selectId === "edit-mmproj" ? "mmproj" : "Draft model";
   const normalizedCurrent = currentPath ? currentPath.replace(/^.*[\\/]/, "") : "";
   const dir = modelsDirCache ? modelsDirCache.replace(/\/$/, "") + "/" : "";
 
@@ -146,14 +149,25 @@ function populateModelDraftSelector(files, currentPath) {
     opt.style.color = "#ef4444";
     select.appendChild(opt);
     if (warning) {
-      warning.textContent = `⚠ Draft model file not found locally: ${normalizedCurrent}`;
+      warning.textContent = `⚠ ${label} file not found locally: ${normalizedCurrent}`;
       warning.classList.remove("is-hidden");
     }
   } else {
     if (warning) warning.classList.add("is-hidden");
   }
 
-  files.forEach((f) => {
+  const isMmproj = selectId === "edit-mmproj";
+  // For the mmproj select, files with "mmproj" in the name go first;
+  // otherwise keep alphabetical order.
+  const sorted = isMmproj
+    ? [...files].sort((a, b) => {
+        const am = a.toLowerCase().includes("mmproj") ? 0 : 1;
+        const bm = b.toLowerCase().includes("mmproj") ? 0 : 1;
+        return am - bm || a.localeCompare(b);
+      })
+    : files;
+
+  sorted.forEach((f) => {
     const opt = document.createElement("option");
     opt.value = dir + f;
     opt.textContent = f;
@@ -184,6 +198,7 @@ function clearModalFields() {
   document.getElementById("edit-url").value = "";
   document.getElementById("edit-model-path").innerHTML = "";
   document.getElementById("edit-model-draft").innerHTML = "";
+  document.getElementById("edit-mmproj").innerHTML = "";
   document.getElementById("edit-port").value = "";
   document.getElementById("edit-context-window").value = "";
   document.getElementById("edit-parallel").value = "";
@@ -192,10 +207,13 @@ function clearModalFields() {
   if (warning) warning.classList.add("is-hidden");
   const mtpWarning = document.getElementById("edit-model-draft-warning");
   if (mtpWarning) mtpWarning.classList.add("is-hidden");
+  const mmprojWarning = document.getElementById("edit-mmproj-warning");
+  if (mmprojWarning) mmprojWarning.classList.add("is-hidden");
 }
 
 function openEditModal(modelId, isManaged) {
   modalMode = "edit";
+  editingIsManaged = isManaged;
   const model = (async () => {
     if (isManaged) {
       return await api(`/api/models/${modelId}/status`);
@@ -208,6 +226,9 @@ function openEditModal(modelId, isManaged) {
   model.then((data) => {
     editingModelId = modelId;
     editingIsManaged = isManaged;
+    // Remember whether the server is currently running so we can offer a
+    // restart-on-save choice when the user edits a live server.
+    editingWasRunning = isManaged && data.status === "online";
     setCreateOnlyVisible(false);
     setManagedOnlyVisible(isManaged);
     document.getElementById("modal-title").textContent = `Edit: ${data.display_name || data.id}`;
@@ -223,6 +244,7 @@ function openEditModal(modelId, isManaged) {
       loadModelFiles().then((mdata) => {
         populateModelSelector(mdata.files || [], data.model_path || "");
         populateModelDraftSelector(mdata.files || [], data.model_draft || "");
+        populateModelDraftSelector(mdata.files || [], data.mmproj || "", "edit-mmproj");
       });
     }
     document.getElementById("edit-modal").classList.remove("is-hidden");
@@ -248,6 +270,7 @@ function openCreateModal(type, prefill = null) {
     loadModelFiles().then((mdata) => {
       populateModelSelector(mdata.files || [], prefill?.model_path || "");
       populateModelDraftSelector(mdata.files || [], "");
+      populateModelDraftSelector(mdata.files || [], "", "edit-mmproj");
       if (prefill?.model_path) {
         const stem = prefill.model_path.replace(/^.*[\\/]/, "").replace(/\.gguf$/i, "");
         document.getElementById("edit-name").value = stem;
@@ -299,6 +322,19 @@ async function saveEditModal() {
   }
   if (!editingModelId) return;
 
+  // If the server is running, ask how to handle the restart before saving.
+  if (editingIsManaged && editingWasRunning) {
+    openRestartModal();
+    return;
+  }
+
+  await doSaveEditModal();
+}
+
+// Actually persist the config. `restart` is "now" | "when_free" | undefined.
+async function doSaveEditModal(restart) {
+  if (!editingModelId) return;
+
   const newName = document.getElementById("edit-name").value.trim();
   const newUrl = document.getElementById("edit-url").value.trim();
 
@@ -307,6 +343,7 @@ async function saveEditModal() {
       name: newName,
       model_path: document.getElementById("edit-model-path").value.trim(),
       model_draft: document.getElementById("edit-model-draft").value.trim(),
+      mmproj: document.getElementById("edit-mmproj").value.trim(),
       port: parseInt(document.getElementById("edit-port").value, 10),
       context_window: parseInt(document.getElementById("edit-context-window").value, 10),
       parallel: parseInt(document.getElementById("edit-parallel").value, 10),
@@ -316,18 +353,19 @@ async function saveEditModal() {
         .filter(Boolean),
     };
     Object.keys(payload).forEach((key) => {
-      if (key === "extra_args" || key === "name" || key === "model_path" || key === "model_draft") return;
+      if (key === "extra_args" || key === "name" || key === "model_path" || key === "model_draft" || key === "mmproj") return;
       if (isNaN(payload[key])) delete payload[key];
     });
     if (payload.name === "") delete payload.name;
+    if (restart) payload.restart = restart;
 
     try {
       setCardError(editingModelId, "");
-      await api(`/api/models/${editingModelId}/config`, {
+      const res = await api(`/api/models/${editingModelId}/config`, {
         method: "POST",
         body: JSON.stringify(payload),
       });
-      setConfigMessage("Config updated");
+      setConfigMessage(res.restarted ? "Config updated — server restarted" : "Config updated");
       closeEditModal();
       await refreshModels();
     } catch (err) {
@@ -355,6 +393,20 @@ async function saveEditModal() {
   }
 }
 
+function openRestartModal() {
+  const modal = document.getElementById("restart-modal");
+  if (!modal) return;
+  // Default to "restart now"
+  const nowRadio = modal.querySelector('input[name="restart-option"][value="now"]');
+  if (nowRadio) nowRadio.checked = true;
+  modal.classList.remove("is-hidden");
+}
+
+function closeRestartModal() {
+  const modal = document.getElementById("restart-modal");
+  if (modal) modal.classList.add("is-hidden");
+}
+
 async function saveCreateModal() {
   const type = document.getElementById("edit-server-type")?.value || "managed";
   const newName = document.getElementById("edit-name").value.trim();
@@ -370,6 +422,7 @@ async function saveCreateModal() {
       name: newName,
       model_path: document.getElementById("edit-model-path").value.trim(),
       model_draft: document.getElementById("edit-model-draft").value.trim(),
+      mmproj: document.getElementById("edit-mmproj").value.trim(),
       port: parseInt(document.getElementById("edit-port").value, 10),
       context_window: parseInt(document.getElementById("edit-context-window").value, 10) || 4096,
       parallel: parseInt(document.getElementById("edit-parallel").value, 10) || 1,
@@ -382,6 +435,7 @@ async function saveCreateModal() {
       setConfigMessage("Model path is required", true);
       return;
     }
+    if (!payload.mmproj) delete payload.mmproj;
     if (isNaN(payload.port)) {
       setConfigMessage("Port is required", true);
       return;
@@ -452,7 +506,7 @@ function canStop(model) {
 
 function formatElapsed(seconds) {
   const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
+  const s = seconds % 66;
   return m ? `${m}m ${String(s).padStart(2, "0")}s` : `${s}s`;
 }
 
@@ -992,6 +1046,36 @@ export function setupModels() {
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && !modal.classList.contains("is-hidden")) {
         closeEditModal();
+      }
+    });
+  }
+
+  // ── Restart-on-save modal ─────────────────────────────
+  const restartModal = document.getElementById("restart-modal");
+  if (restartModal) {
+    restartModal.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLButtonElement)) return;
+      const action = target.dataset.action;
+      if (action === "restart-close" || action === "restart-cancel") {
+        closeRestartModal();
+      } else if (action === "restart-confirm") {
+        const selected = restartModal.querySelector('input[name="restart-option"]:checked');
+        const restart = selected ? selected.value : "now";
+        closeRestartModal();
+        doSaveEditModal(restart);
+      }
+    });
+
+    // Close on overlay click (outside dialog)
+    restartModal.addEventListener("click", (event) => {
+      if (event.target === restartModal) closeRestartModal();
+    });
+
+    // Close on Escape key
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !restartModal.classList.contains("is-hidden")) {
+        closeRestartModal();
       }
     });
   }

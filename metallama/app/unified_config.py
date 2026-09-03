@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import os
+import tempfile
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +16,11 @@ logger = logging.getLogger(__name__)
 # instead of the shared repo-root config.yaml.
 DEFAULT_CONFIG_PATH = os.getenv("METALLAMA_CONFIG_FILE", "config.yaml")
 
+# Serializes all config read-modify-write operations. FastAPI runs sync
+# endpoints in a threadpool, so two requests can otherwise interleave on the
+# shared cached object and lose updates (or save a stale/empty config).
+_config_lock = threading.RLock()
+
 
 # ---------------------------------------------------------------------------
 # Managed server (owned local model)
@@ -23,6 +30,7 @@ class ManagedServer(BaseModel):
     name: str
     model_path: str
     model_draft: str | None = None
+    mmproj: str | None = None
     port: int
     engine: str = "llama"
     context_window: int | None = None
@@ -62,6 +70,7 @@ class UnifiedConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 _CONFIG_CACHE: dict[str, UnifiedConfig] = {}
+_CACHE_MTIME: dict[str, float] = {}
 
 
 def load_unified_config(path: str | Path | None = None) -> UnifiedConfig:
@@ -69,6 +78,10 @@ def load_unified_config(path: str | Path | None = None) -> UnifiedConfig:
 
     If the file doesn't exist or sections are missing/malformed, returns a
     config with safe defaults so the server can still start.
+
+    The cache is validated against the file's mtime, so edits made outside
+    the API (hand edits to config.yaml) are picked up automatically instead
+    of being silently ignored until some API save flushes the cache.
     """
     config_path = Path(path or DEFAULT_CONFIG_PATH)
     if not config_path.is_absolute():
@@ -76,48 +89,60 @@ def load_unified_config(path: str | Path | None = None) -> UnifiedConfig:
         config_path = Path(__file__).resolve().parents[2] / config_path
 
     cache_key = str(config_path.resolve())
-    if cache_key in _CONFIG_CACHE:
-        return _CONFIG_CACHE[cache_key]
+    with _config_lock:
+        try:
+            mtime = config_path.stat().st_mtime
+        except OSError:
+            mtime = None
 
-    if not config_path.exists():
-        logger.info("Config file not found at %s, using defaults", config_path)
-        config = UnifiedConfig()
+        cached = _CONFIG_CACHE.get(cache_key)
+        if cached is not None and _CACHE_MTIME.get(cache_key) == mtime:
+            return cached
+
+        if not config_path.exists():
+            logger.info("Config file not found at %s, using defaults", config_path)
+            config = UnifiedConfig()
+            _CONFIG_CACHE[cache_key] = config
+            _CACHE_MTIME[cache_key] = mtime
+            return config
+
+        try:
+            with config_path.open() as fh:
+                raw = yaml.safe_load(fh) or {}
+        except Exception as exc:
+            logger.warning("Failed to parse config file %s: %s — using defaults", config_path, exc)
+            config = UnifiedConfig()
+            _CONFIG_CACHE[cache_key] = config
+            _CACHE_MTIME[cache_key] = mtime
+            return config
+
+        if not raw:
+            logger.info("Config file %s is empty — using defaults", config_path)
+
+        # Use `or {}` / `or []` to handle None from YAML (e.g. key present but empty)
+        engine_defaults_raw = raw.get("engine_defaults") or {}
+        engine_defaults: dict[str, list[str]] = {}
+        for engine_name, defaults in engine_defaults_raw.items():
+            engine_defaults[engine_name] = defaults if isinstance(defaults, list) else []
+
+        managed = [ManagedServer(**entry) for entry in (raw.get("managed_servers") or []) if entry]
+        remote = [RemoteServer(**entry) for entry in (raw.get("remote_servers") or []) if entry]
+
+        config = UnifiedConfig(
+            engine_defaults=engine_defaults,
+            managed_servers=managed,
+            remote_servers=remote,
+        )
         _CONFIG_CACHE[cache_key] = config
+        _CACHE_MTIME[cache_key] = mtime
         return config
-
-    try:
-        with config_path.open() as fh:
-            raw = yaml.safe_load(fh) or {}
-    except Exception as exc:
-        logger.warning("Failed to parse config file %s: %s — using defaults", config_path, exc)
-        config = UnifiedConfig()
-        _CONFIG_CACHE[cache_key] = config
-        return config
-
-    if not raw:
-        logger.info("Config file %s is empty — using defaults", config_path)
-
-    # Use `or {}` / `or []` to handle None from YAML (e.g. key present but empty)
-    engine_defaults_raw = raw.get("engine_defaults") or {}
-    engine_defaults: dict[str, list[str]] = {}
-    for engine_name, defaults in engine_defaults_raw.items():
-        engine_defaults[engine_name] = defaults if isinstance(defaults, list) else []
-
-    managed = [ManagedServer(**entry) for entry in (raw.get("managed_servers") or []) if entry]
-    remote = [RemoteServer(**entry) for entry in (raw.get("remote_servers") or []) if entry]
-
-    config = UnifiedConfig(
-        engine_defaults=engine_defaults,
-        managed_servers=managed,
-        remote_servers=remote,
-    )
-    _CONFIG_CACHE[cache_key] = config
-    return config
 
 
 def clear_config_cache() -> None:
     """Clear the config cache (useful for regeneration workflows)."""
-    _CONFIG_CACHE.clear()
+    with _config_lock:
+        _CONFIG_CACHE.clear()
+        _CACHE_MTIME.clear()
 
 
 def update_managed_server(server_id: str, updates: dict[str, Any], path: str | Path | None = None) -> None:
@@ -125,79 +150,86 @@ def update_managed_server(server_id: str, updates: dict[str, Any], path: str | P
 
     Typical usage: update_managed_server("llamacpp-coding", {"context_window": 128000})
     """
-    config = load_unified_config(path)
-    for i, server in enumerate(config.managed_servers):
-        if server.name == server_id:
-            for key, value in updates.items():
-                if hasattr(server, key):
-                    setattr(server, key, value)
-            config.managed_servers[i] = server
-            save_unified_config(config, path)
-            return
-    raise ValueError(f"Managed server '{server_id}' not found in config")
+    with _config_lock:
+        config = load_unified_config(path)
+        for i, server in enumerate(config.managed_servers):
+            if server.name == server_id:
+                for key, value in updates.items():
+                    if hasattr(server, key):
+                        setattr(server, key, value)
+                config.managed_servers[i] = server
+                save_unified_config(config, path)
+                return
+        raise ValueError(f"Managed server '{server_id}' not found in config")
 
 
 def update_remote_server(server_id: str, updates: dict[str, Any], path: str | Path | None = None) -> None:
     """Update fields on a remote_server entry in config.yaml."""
-    config = load_unified_config(path)
-    for i, server in enumerate(config.remote_servers):
-        if server.name == server_id:
-            for key, value in updates.items():
-                if hasattr(server, key):
-                    setattr(server, key, value)
-            config.remote_servers[i] = server
-            save_unified_config(config, path)
-            return
-    raise ValueError(f"Remote server '{server_id}' not found in config")
+    with _config_lock:
+        config = load_unified_config(path)
+        for i, server in enumerate(config.remote_servers):
+            if server.name == server_id:
+                for key, value in updates.items():
+                    if hasattr(server, key):
+                        setattr(server, key, value)
+                config.remote_servers[i] = server
+                save_unified_config(config, path)
+                return
+        raise ValueError(f"Remote server '{server_id}' not found in config")
 
 
 def delete_managed_server(server_id: str, path: str | Path | None = None) -> None:
     """Remove a managed_server entry from config.yaml."""
-    config = load_unified_config(path)
-    before = len(config.managed_servers)
-    config.managed_servers = [s for s in config.managed_servers if s.name != server_id]
-    if len(config.managed_servers) == before:
-        raise ValueError(f"Managed server '{server_id}' not found in config")
-    save_unified_config(config, path)
+    with _config_lock:
+        config = load_unified_config(path)
+        before = len(config.managed_servers)
+        config.managed_servers = [s for s in config.managed_servers if s.name != server_id]
+        if len(config.managed_servers) == before:
+            raise ValueError(f"Managed server '{server_id}' not found in config")
+        save_unified_config(config, path)
 
 
 def delete_remote_server(server_id: str, path: str | Path | None = None) -> None:
     """Remove a remote_server entry from config.yaml."""
-    config = load_unified_config(path)
-    before = len(config.remote_servers)
-    config.remote_servers = [s for s in config.remote_servers if s.name != server_id]
-    if len(config.remote_servers) == before:
-        raise ValueError(f"Remote server '{server_id}' not found in config")
-    save_unified_config(config, path)
+    with _config_lock:
+        config = load_unified_config(path)
+        before = len(config.remote_servers)
+        config.remote_servers = [s for s in config.remote_servers if s.name != server_id]
+        if len(config.remote_servers) == before:
+            raise ValueError(f"Remote server '{server_id}' not found in config")
+        save_unified_config(config, path)
 
 
 def add_managed_server(data: dict[str, Any], path: str | Path | None = None) -> ManagedServer:
     """Add a new managed_server entry to config.yaml."""
-    config = load_unified_config(path)
-    if any(s.name == data.get("name") for s in config.managed_servers):
-        raise ValueError(f"Managed server '{data.get('name')}' already exists")
-    server = ManagedServer(**data)
-    config.managed_servers.append(server)
-    save_unified_config(config, path)
-    return server
+    with _config_lock:
+        config = load_unified_config(path)
+        if any(s.name == data.get("name") for s in config.managed_servers):
+            raise ValueError(f"Managed server '{data.get('name')}' already exists")
+        server = ManagedServer(**data)
+        config.managed_servers.append(server)
+        save_unified_config(config, path)
+        return server
 
 
 def add_remote_server(data: dict[str, Any], path: str | Path | None = None) -> RemoteServer:
     """Add a new remote_server entry to config.yaml."""
-    config = load_unified_config(path)
-    if any(s.name == data.get("name") for s in config.remote_servers):
-        raise ValueError(f"Remote server '{data.get('name')}' already exists")
-    server = RemoteServer(**data)
-    config.remote_servers.append(server)
-    save_unified_config(config, path)
-    return server
+    with _config_lock:
+        config = load_unified_config(path)
+        if any(s.name == data.get("name") for s in config.remote_servers):
+            raise ValueError(f"Remote server '{data.get('name')}' already exists")
+        server = RemoteServer(**data)
+        config.remote_servers.append(server)
+        save_unified_config(config, path)
+        return server
 
 
 def update_engine_defaults(engine: str, args: list[str], path: str | Path | None = None) -> None:
     """Replace the default CLI args for an engine in config.yaml."""
-    config = load_unified_config(path)
-    config.engine_defaults[engine] = args
-    save_unified_config(config, path)
+    with _config_lock:
+        config = load_unified_config(path)
+        config.engine_defaults[engine] = args
+        save_unified_config(config, path)
 
 
 def _yaml_str_value(value: Any) -> str:
@@ -234,83 +266,105 @@ def save_unified_config(config: UnifiedConfig, path: str | Path | None = None) -
     Uses a template-based writer instead of yaml.dump() so that human-edited
     comments and section headers are preserved across saves.
     """
-    config_path = Path(path or DEFAULT_CONFIG_PATH)
-    if not config_path.is_absolute():
-        config_path = Path(__file__).resolve().parents[2] / config_path
+    with _config_lock:
+        config_path = Path(path or DEFAULT_CONFIG_PATH)
+        if not config_path.is_absolute():
+            config_path = Path(__file__).resolve().parents[2] / config_path
 
-    lines: list[str] = []
-    lines.append("# Metallama Unified Configuration")
-    lines.append("# =================================")
-    lines.append("# This file is the single source of truth for all server configurations.")
-    lines.append("#")
-    lines.append("# Sections:")
-    lines.append("#   engine_defaults  - Default parameters for llama.cpp servers (machine-managed)")
-    lines.append("#   managed_servers  - Owned local models (machine-generated, can be regenerated)")
-    lines.append("#   remote_servers   - Distant servers (hand-edited by humans)")
-    lines.append("#")
-    lines.append("# Machine-managed sections may contain auto-generated comments.")
-    lines.append("# Remote servers section is safe for manual editing.")
-    lines.append("")
+        lines: list[str] = []
+        lines.append("# Metallama Unified Configuration")
+        lines.append("# =================================")
+        lines.append("# This file is the single source of truth for all server configurations.")
+        lines.append("#")
+        lines.append("# Sections:")
+        lines.append("#   engine_defaults  - Default parameters for llama.cpp servers (machine-managed)")
+        lines.append("#   managed_servers  - Owned local models (machine-generated, can be regenerated)")
+        lines.append("#   remote_servers   - Distant servers (hand-edited by humans)")
+        lines.append("#")
+        lines.append("# Machine-managed sections may contain auto-generated comments.")
+        lines.append("# Remote servers section is safe for manual editing.")
+        lines.append("")
 
-    # --- engine_defaults ---
-    lines.append("# ---------------------------------------------------------------------------")
-    lines.append("# Engine Defaults (Machine-Managed)")
-    lines.append("# Default CLI args prepended to every server launch for this engine.")
-    lines.append("# Last flag wins when merged with per-server args.")
-    lines.append("# ---------------------------------------------------------------------------")
-    lines.append("engine_defaults:")
-    for engine_name, args in config.engine_defaults.items():
-        lines.append(f"  {engine_name}:")
-        if args:
-            for arg in args:
-                lines.append(f"    - {arg}")
-        else:
-            lines.append("    []")
-    lines.append("")
+        # --- engine_defaults ---
+        lines.append("# ---------------------------------------------------------------------------")
+        lines.append("# Engine Defaults (Machine-Managed)")
+        lines.append("# Default CLI args prepended to every server launch for this engine.")
+        lines.append("# Last flag wins when merged with per-server args.")
+        lines.append("# ---------------------------------------------------------------------------")
+        lines.append("engine_defaults:")
+        for engine_name, args in config.engine_defaults.items():
+            lines.append(f"  {engine_name}:")
+            if args:
+                for arg in args:
+                    lines.append(f"    - {arg}")
+            else:
+                lines.append("    []")
+        lines.append("")
 
-    # --- managed_servers ---
-    lines.append("# ---------------------------------------------------------------------------")
-    lines.append("# Managed Servers (Machine-Generated)")
-    lines.append("# Local models owned by this project. Configuration is generated/managed")
-    lines.append("# by the application. Manual edits may be overwritten on regeneration.")
-    lines.append("# ---------------------------------------------------------------------------")
-    lines.append("managed_servers:")
-    for server in config.managed_servers:
-        lines.append(f'  - name: "{server.name}"')
-        lines.append(f'    model_path: "{server.model_path}"')
-        if server.model_draft:
-            lines.append(f'    model_draft: "{server.model_draft}"')
-        lines.append(f"    port: {server.port}")
-        if server.engine != "llama":
-            lines.append(f'    engine: "{server.engine}"')
-        lines.append(f"    context_window: {'null' if server.context_window is None else server.context_window}")
-        lines.append(f"    parallel: {server.parallel}")
-        if server.auto_start:
-            lines.append(f"    auto_start: {str(server.auto_start).lower()}")
-        if server.extra_args:
-            lines.append("    extra_args:")
-            for arg in server.extra_args:
-                lines.append(f"      - {arg}")
-        else:
-            lines.append("    extra_args: []")
-    lines.append("")
+        # --- managed_servers ---
+        lines.append("# ---------------------------------------------------------------------------")
+        lines.append("# Managed Servers (Machine-Generated)")
+        lines.append("# Local models owned by this project. Configuration is generated/managed")
+        lines.append("# by the application. Manual edits may be overwritten on regeneration.")
+        lines.append("# ---------------------------------------------------------------------------")
+        lines.append("managed_servers:")
+        for server in config.managed_servers:
+            lines.append(f'  - name: "{server.name}"')
+            lines.append(f'    model_path: "{server.model_path}"')
+            if server.model_draft:
+                lines.append(f'    model_draft: "{server.model_draft}"')
+            if server.mmproj:
+                lines.append(f'    mmproj: "{server.mmproj}"')
+            lines.append(f"    port: {server.port}")
+            if server.engine != "llama":
+                lines.append(f'    engine: "{server.engine}"')
+            lines.append(f"    context_window: {'null' if server.context_window is None else server.context_window}")
+            lines.append(f"    parallel: {server.parallel}")
+            if server.auto_start:
+                lines.append(f"    auto_start: {str(server.auto_start).lower()}")
+            if server.extra_args:
+                lines.append("    extra_args:")
+                for arg in server.extra_args:
+                    lines.append(f"      - {arg}")
+            else:
+                lines.append("    extra_args: []")
+        lines.append("")
 
-    # --- remote_servers ---
-    lines.append("# ---------------------------------------------------------------------------")
-    lines.append("# Remote Servers (Hand-Edited)")
-    lines.append("# Distant servers not owned by this project. Safe for manual editing.")
-    lines.append("# These are read-only from the application's perspective.")
-    lines.append("# ---------------------------------------------------------------------------")
-    lines.append("remote_servers:")
-    for server in config.remote_servers:
-        lines.append(f'  - name: "{server.name}"')
-        lines.append(f'    url: "{server.url}"')
-        lines.append(f'    family: "{server.family}"')
-        lines.append(f'    size: "{server.size}"')
-        lines.append(f"    context_length: {server.context_length}")
-    lines.append("")
+        # --- remote_servers ---
+        lines.append("# ---------------------------------------------------------------------------")
+        lines.append("# Remote Servers (Hand-Edited)")
+        lines.append("# Distant servers not owned by this project. Safe for manual editing.")
+        lines.append("# These are read-only from the application's perspective.")
+        lines.append("# ---------------------------------------------------------------------------")
+        lines.append("remote_servers:")
+        for server in config.remote_servers:
+            lines.append(f'  - name: "{server.name}"')
+            lines.append(f'    url: "{server.url}"')
+            lines.append(f'    family: "{server.family}"')
+            lines.append(f'    size: "{server.size}"')
+            lines.append(f"    context_length: {server.context_length}")
+        lines.append("")
 
-    with config_path.open("w") as fh:
-        fh.write("\n".join(lines))
+        # Atomic write: write to a temp file in the same directory, fsync it, then
+        # os.replace() over the target. This guarantees the config file is never left
+        # truncated/empty if the process is interrupted mid-write (crash, kill, or a
+        # concurrent reader), which previously could "wipe" the config.
+        content = "\n".join(lines)
+        fd, tmp_path = tempfile.mkstemp(
+            dir=str(config_path.parent), prefix=config_path.name + ".", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(content)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp_path, config_path)
+        except BaseException:
+            # Clean up the temp file on any failure so we don't leave litter behind.
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
-    clear_config_cache()
+        clear_config_cache()

@@ -49,6 +49,8 @@ def get_profile_with_config(profile: ModelProfile) -> ModelProfile:
         overrides["parallel"] = server_entry.parallel
     if server_entry.model_draft != profile.model_draft:
         overrides["model_draft"] = server_entry.model_draft
+    if server_entry.mmproj != profile.mmproj:
+        overrides["mmproj"] = server_entry.mmproj
 
     return replace(profile, **overrides) if overrides else profile
 
@@ -150,6 +152,8 @@ def build_command_preview(profile: ModelProfile) -> tuple[list[str], bool]:
     cmd = [binary, "--model", str(profile.model_path), "--host", Config.BIND_HOST, "--port", str(profile.port)]
     if profile.model_draft:
         cmd += ["--model-draft", str(profile.model_draft)]
+    if profile.mmproj:
+        cmd += ["--mmproj", str(profile.mmproj)]
     cmd += extra_args
 
     return (cmd, found)
@@ -199,6 +203,8 @@ def build_command(profile: ModelProfile) -> list[str]:
     cmd = [binary, "--model", str(model_path), "--host", Config.BIND_HOST, "--port", str(profile.port)]
     if profile.model_draft:
         cmd += ["--model-draft", str(profile.model_draft)]
+    if profile.mmproj:
+        cmd += ["--mmproj", str(profile.mmproj)]
     cmd += extra_args
 
     return cmd
@@ -272,6 +278,7 @@ def vram_estimate_for(profile: ModelProfile) -> dict[str, Any] | None:
         ctx_total,
         profile.model_draft,
         kv_bytes_per_element=_kv_bytes_per_element(profile),
+        extra_weights_paths=[profile.mmproj] if profile.mmproj else None,
     )
     if not est:
         return None
@@ -301,6 +308,11 @@ def _load_progress(profile: ModelProfile, state: ProcessState) -> float | None:
         if profile.model_draft:
             try:
                 total += Path(profile.model_draft).stat().st_size
+            except OSError:
+                pass
+        if profile.mmproj:
+            try:
+                total += Path(profile.mmproj).stat().st_size
             except OSError:
                 pass
         if total <= 0:
@@ -349,6 +361,7 @@ async def model_payload(profile: ModelProfile) -> dict[str, Any]:
         "parallel": profile.parallel,
         "extra_args": profile.extra_args,
         "model_draft": profile.model_draft,
+        "mmproj": profile.mmproj,
         "model_found": model_found,
         "managed": True,
         "last_exit": get_unexpected_exit(profile.name) if status == "offline" else None,

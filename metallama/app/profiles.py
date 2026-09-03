@@ -18,6 +18,7 @@ def _build_profiles() -> dict[str, ModelProfile]:
             context_window=server.context_window,
             parallel=server.parallel,
             model_draft=server.model_draft,
+            mmproj=server.mmproj,
         )
     return profiles
 

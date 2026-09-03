@@ -37,7 +37,7 @@ and an OpenAI-compatible gateway (`/ollama/v1/*`). Mutating endpoints are guarde
 | GET | `/api/models/{name}/logs` | Captured server logs (incremental/tail) |
 | POST | `/api/models/{name}/auto-start` | Toggle auto-start on launch |
 | GET | `/api/models/{id}/command` | Preview the launch command |
-| POST | `/api/models/{name}/config` | Update managed server config (stopped only) |
+| POST | `/api/models/{name}/config` | Update managed server config. If running, requires `restart: "now"` or `"when_free"` to save+restart |
 | POST | `/api/remote-servers/{name}/config` | Update remote server config |
 
 ### Engine Defaults
@@ -49,9 +49,11 @@ and an OpenAI-compatible gateway (`/ollama/v1/*`). Mutating endpoints are guarde
 ### Library & Model Files
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/library` | Inventory of models dir (GGUFs + partials) |
+| GET | `/api/library` | Inventory of models dir (GGUFs + partials, with `downloaded_at`, newest first) |
 | POST | `/api/library/partials/discard` | Delete a `.partial` file |
+| POST | `/api/library/partials/rename` | Rename a `.partial` file (and its `.meta` sidecar) |
 | POST | `/api/library/models/delete` | Delete a `.gguf` model file |
+| POST | `/api/library/models/rename` | Rename a `.gguf` model file (updates referencing server configs) |
 | GET | `/api/model-files` | List `.gguf` files in models dir |
 
 ### HuggingFace

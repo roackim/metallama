@@ -10,4 +10,14 @@
 [2026-09-03T11:00:00Z] CREATED notes/config.md — env vars, config.yaml, defaults
 [2026-09-03T11:00:00Z] CREATED notes/security.md — auth model, trust boundaries, secrets
 [2026-09-03T11:00:00Z] CREATED notes/api.md — REST + Ollama/OpenAI API surface
-[2026-09-03T11:00:00Z] CREATED notes/frontend.md — frontend structure and patterns
+[2026-09-03T11:00:00Z] CREATED notes/frontend.md — frontend structure and patterns[2026-09-03T09:25:35Z] UPDATED unified_config.py — save_unified_config now writes atomically (temp file + os.replace) to prevent config wipe on interrupted save
+[2026-09-03T09:31:08Z] UPDATED unified_config.py — added _config_lock (RLock) serializing all config read-modify-write ops; load/save/clear now lock-protected to prevent lost-update wipes
+[2026-09-03T09:35:59Z] UPDATED main.py + models/index.js + index.html + styles.css — config save on running server now offers 'restart now' / 'restart when free' via a warning modal; backend accepts restart param
+[2026-09-03T09:40:16Z] UPDATED main.py + library/index.js — added rename for library models (.gguf) and partial downloads; backend updates referencing server configs; traversal-guarded
+[2026-09-03T09:46:46Z] UPDATED main.py + library/index.js — /api/library now returns downloaded_at (file mtime) for models and partials; models sorted newest-first
+[2026-09-03T10:16:47Z] UPDATED index.html + styles.css + library/index.js — moved Model Library below server cards (full width); dates now in a fixed right-aligned column (aligned across all items)
+[2026-09-03T15:18:31Z] UPDATED models/unified_config/profiles/runtime/gguf/main.py + index.html + models/index.js — added mmproj field to server config: saved to config.yaml, exposed in API, --mmproj added to launch command, included in VRAM/load estimates, editable via modal like draft model
+[2026-09-03T15:23:47Z] UPDATED models/index.js — mmproj dropdown lists files with 'mmproj' in the name first, then alphabetical
+[2026-09-03T15:32:10Z] VERIFIED mmproj save end-to-end via browser UI — persists to config.yaml for both servers; earlier report was stale browser cache
+[2026-09-03T15:45:29Z] FIXED unified_config.py — config cache now validates against file mtime; hand edits to config.yaml are picked up without API save (root cause of stale mmproj). Also reverted test mmproj artifact on Qwen3.6-27B-Q8_0-MTP (backup: config.yaml.bak)
+[2026-09-03T16:00:35Z] FIXED models/index.js — edit modal was passing empty string instead of data.mmproj to populateModelDraftSelector; mmproj now displays saved value in edit panel (verified live in browser)

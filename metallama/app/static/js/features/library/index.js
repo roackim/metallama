@@ -27,10 +27,12 @@ function modelItem(m) {
         <span class="library-item-name">${escapeHtml(m.name)}</span>
         <span class="library-item-meta">${escapeHtml(metaBits)}</span>
       </div>
+      <span class="library-item-date" title="Downloaded">${escapeHtml(m.downloaded_at || "")}</span>
       <div class="library-item-actions">
         ${hasServer
-          ? ""
+          ? `<span class="library-action-spacer"></span>`
           : `<button class="btn-secondary btn-small library-add admin-only" data-path="${escapeHtml(m.path)}" title="Create a server for this model">+ Serve</button>`}
+        <button class="btn-secondary btn-small library-rename admin-only" data-rel="${escapeHtml(m.rel_path)}" data-name="${escapeHtml(m.name)}" title="Rename this model file">Rename</button>
         <button class="btn-danger btn-small library-delete admin-only" data-rel="${escapeHtml(m.rel_path)}" data-name="${escapeHtml(m.name)}" title="Permanently delete this model file">Delete</button>
       </div>
     </div>`;
@@ -47,10 +49,12 @@ function partialItem(p) {
         <div class="library-partial-track"><div class="library-partial-fill" style="width: ${width}%"></div></div>
         <span class="library-item-meta">${pct} downloaded${canResume ? "" : " · re-download the same file to resume"}</span>
       </div>
+      <span class="library-item-date" title="Downloaded">${escapeHtml(p.downloaded_at || "")}</span>
       <div class="library-partial-actions">
         ${canResume
           ? `<button class="btn-primary btn-small library-resume admin-only" data-repo="${escapeHtml(p.repo_id)}" data-file="${escapeHtml(p.filename)}" data-name="${escapeHtml(p.name)}" title="Continue this download">Resume</button>`
           : ""}
+        <button class="btn-secondary btn-small library-rename admin-only" data-rel="${escapeHtml(p.rel_path)}" data-name="${escapeHtml(p.name)}" title="Rename this partial download">Rename</button>
         <button class="btn-secondary btn-small library-discard admin-only" data-rel="${escapeHtml(p.rel_path)}" title="Delete the partial file${canResume ? "" : " (source unknown — re-download from search)"}">Discard</button>
       </div>
     </div>`;
@@ -119,6 +123,30 @@ async function deleteModel(relPath, name) {
   await refreshLibrary();
 }
 
+async function renameItem(relPath, name, isPartial) {
+  const current = name || relPath.split("/").pop() || "";
+  const base = current.replace(/\.(gguf|partial)$/i, "");
+  const newName = window.prompt(`Rename "${current}" to:`, base);
+  if (newName === null) return; // cancelled
+  const trimmed = newName.trim();
+  if (!trimmed) {
+    setConfigMessage("Rename cancelled — name is empty", true);
+    return;
+  }
+  const endpoint = isPartial ? "/api/library/partials/rename" : "/api/library/models/rename";
+  try {
+    await api(endpoint, {
+      method: "POST",
+      body: JSON.stringify({ rel_path: relPath, new_name: trimmed }),
+    });
+    setConfigMessage(`Renamed to: ${trimmed}`);
+    window.__metallamaInvalidateModelCache?.();
+  } catch (err) {
+    setConfigMessage(err.message, true);
+  }
+  await refreshLibrary();
+}
+
 export function setupLibrary() {
   const panel = document.getElementById("library-panel");
   if (!panel) return;
@@ -139,6 +167,9 @@ export function setupLibrary() {
         target.dataset.name || target.dataset.file
       );
       setConfigMessage(`Resuming download: ${target.dataset.name}`);
+    } else if (target.classList.contains("library-rename")) {
+      const isPartial = target.closest(".library-item")?.classList.contains("partial") || false;
+      renameItem(target.dataset.rel || "", target.dataset.name || "", isPartial);
     } else if (target.classList.contains("library-discard")) {
       const item = target.closest(".library-item");
       const name = item?.querySelector(".library-item-name")?.textContent || "this file";

@@ -34,7 +34,8 @@ downloads, system monitoring, and the HTTP API surface.
 | `check_password()` | auth.py | Verifies a plaintext password against the stored hash |
 | `create_session()` / `validate_session()` | auth.py | Session token lifecycle (8h TTL) |
 | `Config` | config.py | Env-var config (binary, base URL, models dir, bind host) |
-| `load_unified_config()` | unified_config.py | Loads config.yaml with safe defaults + caching |
+| `load_unified_config()` | unified_config.py | Loads config.yaml with safe defaults + caching (lock-protected) |
+| `save_unified_config()` | unified_config.py | Writes config.yaml atomically (temp file + `os.replace`), lock-protected |
 | `update_managed_server()` | unified_config.py | Edits a managed server entry in config.yaml |
 | `add_managed_server()` / `delete_managed_server()` | unified_config.py | Managed server CRUD |
 | `add_remote_server()` / `update_remote_server()` | unified_config.py | Remote server CRUD |

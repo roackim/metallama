@@ -98,12 +98,15 @@ def estimate_vram_gb(
     context_tokens: int,
     draft_model_path: str | Path | None = None,
     kv_bytes_per_element: float = 2.0,
+    extra_weights_paths: list[str | Path] | None = None,
 ) -> dict[str, float] | None:
     """Rough VRAM estimate (upper bound) for fully offloaded weights + KV cache.
 
     Returns {"weights_gb", "kv_cache_gb", "total_gb"} or None if the model
     file can't be read. kv_bytes_per_element: 2.0 for f16, ~1.06 for q8_0.
-    Models with sliding-window/hybrid attention need less than estimated.
+    extra_weights_paths: additional weight files (e.g. mmproj) added to the
+    weights total. Models with sliding-window/hybrid attention need less than
+    estimated.
     """
     p = Path(model_path)
     try:
@@ -113,6 +116,11 @@ def estimate_vram_gb(
     if draft_model_path:
         try:
             weights_bytes += Path(draft_model_path).stat().st_size
+        except OSError:
+            pass
+    for extra in extra_weights_paths or []:
+        try:
+            weights_bytes += Path(extra).stat().st_size
         except OSError:
             pass
 
