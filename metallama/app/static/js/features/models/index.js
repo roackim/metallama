@@ -30,6 +30,33 @@ let modelsDirCache = "";
 // Expose cache invalidation for HF download module
 window.__metallamaInvalidateModelCache = () => { modelFilesCache = null; };
 
+// Click-through protection: the periodic refresh (every 2s) replaces the card
+// DOM via innerHTML. If that happens between mousedown and mouseup, the
+// browser never fires the click event — the user has to click again. While a
+// press is in progress we defer the DOM swap until after the click fires.
+let pressCount = 0;
+let lastPressAt = 0;
+let pendingModels = null;
+let flushScheduled = false;
+
+function flushPendingModels() {
+  flushScheduled = false;
+  // Stale press guard: if pointerup was lost (alt-tab mid-press), recover.
+  if (pressCount > 0 && Date.now() - lastPressAt > 3000) pressCount = 0;
+  if (pressCount > 0 || !pendingModels) return;
+  const models = pendingModels;
+  pendingModels = null;
+  renderModels(models);
+}
+
+function scheduleFlush() {
+  if (flushScheduled) return;
+  flushScheduled = true;
+  // setTimeout(0) is essential: it lets the browser finish dispatching
+  // mouseup + click on the still-attached DOM before we swap it.
+  setTimeout(flushPendingModels, 0);
+}
+
 async function loadModelFiles() {
   if (modelFilesCache) return modelFilesCache;
   try {
@@ -837,6 +864,13 @@ function renderModels(models) {
     return true;
   });
 
+  // Don't swap the DOM mid-press — a swap between mousedown and mouseup
+  // suppresses the click event entirely (the "have to click twice" bug).
+  if (pressCount > 0) {
+    pendingModels = models;
+    return;
+  }
+
   modelsEl.innerHTML = visible.map(cardTemplate).join("");
   hydrateLogPanels();
   document.getElementById("models-filter-empty")?.classList.toggle("is-hidden", visible.length > 0 || models.length === 0);
@@ -844,7 +878,25 @@ function renderModels(models) {
   summaryEl.textContent = `${running} / ${models.length} running`;
 }
 
+// Serialized refresh + skip-if-unchanged: /api/models probes remote servers
+// (3s timeout each) so a refresh can outlast the 2s polling interval. Without
+// serialization, overlapping refreshes stack up and hammer the DOM with
+// innerHTML swaps — the "sometimes a click doesn't register" bug. Skipping
+// the swap when nothing changed removes ~all needless DOM churn.
+let refreshInFlight = false;
+let lastModelsJson = null;
+
 export async function refreshModels() {
+  if (refreshInFlight) return;
+  refreshInFlight = true;
+  try {
+    await doRefreshModels();
+  } finally {
+    refreshInFlight = false;
+  }
+}
+
+async function doRefreshModels() {
   const activeElement = document.activeElement;
   if (activeElement && (activeElement.classList?.contains("ctx-inline-input") || activeElement.classList?.contains("par-inline-input"))) {
     return;
@@ -852,6 +904,21 @@ export async function refreshModels() {
 
   const data = await api("/api/models");
   const models = data.models || [];
+
+  const json = JSON.stringify(models);
+  if (json === lastModelsJson && modelsEl.children.length) {
+    // Nothing changed — only update slot indicators, skip the DOM swap.
+    const now = Date.now();
+    if (now - lastSlotRefresh >= SLOT_REFRESH_INTERVAL) {
+      lastSlotRefresh = now;
+      refreshSlots(models).then(updateSlotIndicators).catch(() => {});
+    } else {
+      updateSlotIndicators();
+    }
+    return;
+  }
+  lastModelsJson = json;
+
   renderModels(models);
   // Fetch slot status on a throttled cadence (every 5s) to avoid contending
   // with active inference. Non-blocking so it never delays the next refresh.
@@ -943,6 +1010,28 @@ export function setupModels() {
   if (!modelsEl) {
     return;
   }
+
+  // Track press state on the whole models area so renderModels() can defer
+  // the DOM swap until the click has fully dispatched (see pressCount above).
+  modelsEl.addEventListener("pointerdown", () => {
+    pressCount++;
+    lastPressAt = Date.now();
+  });
+  document.addEventListener("pointerup", () => {
+    if (pressCount > 0) {
+      pressCount--;
+      lastPressAt = Date.now();
+      if (pressCount === 0) scheduleFlush();
+    }
+  });
+  // Cancelled presses (drag out, alt-tab mid-press) must not wedge rendering.
+  document.addEventListener("pointercancel", () => {
+    if (pressCount > 0) {
+      pressCount--;
+      lastPressAt = Date.now();
+      if (pressCount === 0) scheduleFlush();
+    }
+  });
 
   modelsEl.addEventListener("click", async (event) => {
     const target = event.target;

@@ -76,6 +76,34 @@ export async function refreshLibrary() {
   const models = data.models || [];
   const partials = data.partials || [];
 
+  // Skip the DOM swap when nothing changed, to avoid needless churn that can
+  // swallow a mid-click on a library button.
+  const sig = JSON.stringify({ models, partials });
+  if (sig === libraryLastSig && listEl.children.length) {
+    return;
+  }
+  libraryLastSig = sig;
+
+  // Defer the DOM swap while a press is in progress — a swap between
+  // mousedown and mouseup suppresses the click event (double-click bug).
+  if (libraryPressCount > 0) {
+    libraryPendingHtml = { models, partials };
+    return;
+  }
+  renderLibrary(models, partials);
+}
+
+let libraryPressCount = 0;
+let libraryPendingHtml = null;
+let libraryLastSig = null;
+
+function renderLibrary(models, partials) {
+  const listEl = document.getElementById("library-list");
+  const dlEl = document.getElementById("library-downloading");
+  const emptyEl = document.getElementById("library-empty");
+  const listTitle = document.getElementById("library-list-title");
+  if (!listEl) return;
+
   listEl.innerHTML = models.map(modelItem).join("");
   listTitle?.classList.toggle("is-hidden", models.length === 0);
   emptyEl?.classList.toggle("is-hidden", models.length > 0 || partials.length > 0);
@@ -150,6 +178,19 @@ async function renameItem(relPath, name, isPartial) {
 export function setupLibrary() {
   const panel = document.getElementById("library-panel");
   if (!panel) return;
+
+  // Press tracking so refreshLibrary() defers its DOM swap mid-click.
+  panel.addEventListener("pointerdown", () => { libraryPressCount++; });
+  document.addEventListener("pointerup", () => { libraryPressCount = Math.max(0, libraryPressCount - 1); });
+  document.addEventListener("pointercancel", () => { libraryPressCount = Math.max(0, libraryPressCount - 1); });
+  // Flush any render that was deferred while the user was pressing.
+  document.addEventListener("pointerup", () => {
+    if (libraryPressCount === 0 && libraryPendingHtml) {
+      const { models, partials } = libraryPendingHtml;
+      libraryPendingHtml = null;
+      renderLibrary(models, partials);
+    }
+  });
 
   // models/index.js can't import us (we import it), so expose a hook
   window.__metallamaRefreshLibrary = () => refreshLibrary().catch(() => {});

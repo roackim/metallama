@@ -103,10 +103,23 @@ def _query_rocm() -> list[dict[str, float]]:
 
 
 def _query_amd() -> list[dict[str, float]]:
+    """Query amd-smi. Handles both output formats across amd-smi versions:
+
+    - Newer versions wrap entries in a top-level "gpu_data" list:
+      {"gpu_data": [{"gpu": 0, "mem_usage": {...}}, ...]}
+    - Older versions return a bare list:
+      [{"gpu": 0, "mem_usage": {...}}, ...]
+    """
     out = _run(["amd-smi", "metric", "--mem-usage", "--json"])
     data = json.loads(out)
+    if isinstance(data, dict):
+        entries = data.get("gpu_data") or []
+    elif isinstance(data, list):
+        entries = data
+    else:
+        entries = []
     gpus = []
-    for entry in data if isinstance(data, list) else []:
+    for entry in entries:
         usage = entry.get("mem_usage", {}) if isinstance(entry, dict) else {}
         total = usage.get("total_vram", {}).get("value")
         used = usage.get("used_vram", {}).get("value")
@@ -163,6 +176,26 @@ def vram_status() -> dict[str, Any]:
         return {"error": "no GPU tool found (nvidia-smi / rocm-smi / amd-smi)", "available": False}
     gpus_raw = get_gpu_memory()
     if gpus_raw is None:
+        # The detected tool failed (or parsed nothing). Try the other installed
+        # tools before giving up — e.g. rocm-smi can fail under restricted
+        # service environments where amd-smi still works, and vice versa.
+        for alt in ("nvidia-smi", "rocm-smi", "amd-smi"):
+            if alt == tool or shutil.which(alt) is None:
+                continue
+            try:
+                if alt == "nvidia-smi":
+                    gpus_raw = _query_nvidia()
+                elif alt == "rocm-smi":
+                    gpus_raw = _query_rocm()
+                else:
+                    gpus_raw = _query_amd()
+                if gpus_raw:
+                    logger.info("Primary GPU tool %s failed; fallback %s succeeded", tool, alt)
+                    tool = alt
+                    break
+            except Exception:
+                continue
+    if not gpus_raw:
         return {"error": f"{tool} failed (check server logs)", "available": False}
     gpus = []
     for g in gpus_raw:
