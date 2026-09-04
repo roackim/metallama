@@ -247,9 +247,13 @@ function clearModalFields() {
 function populateReasoningEfforts(supported, enabled) {
   const container = document.getElementById("edit-reasoning-efforts");
   const master = document.getElementById("edit-reasoning-enabled");
+  const label = document.getElementById("edit-reasoning-label");
   if (!container || !master) return;
   const enabledSet = new Set(enabled || []);
-  const supportedList = supported && supported.length ? supported : ["low", "medium", "high", "xhigh"];
+  const supportedList = Array.isArray(supported) ? supported : [];
+  if (label) label.textContent = supportedList.length
+    ? "Expose reasoning-effort models"
+    : "Expose reasoning-effort models (none available)";
   container.innerHTML = supportedList
     .map((effort) => `
       <label>
@@ -257,8 +261,9 @@ function populateReasoningEfforts(supported, enabled) {
         <span>${effort}</span>
       </label>
     `)
-    .join("");
-  master.checked = (enabled && enabled.length > 0);
+    .join("") || `<p class="form-hint">No reasoning-effort levels were detected for this model.</p>`;
+  master.checked = supportedList.length > 0 && (enabled && enabled.length > 0);
+  master.disabled = supportedList.length === 0;
   // Toggling the master enables/disables the per-effort checkboxes.
   const setDisabled = () => {
     container.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
