@@ -6,6 +6,41 @@ from .schemas import AppConfig, SubserverConfig
 
 _registry: dict[str, SubserverConfig] = {}
 
+# Recognized reasoning-effort values. A client can select e.g.
+# "Qwen3.8-27B-Q8_0:high" to request a specific reasoning effort; the gateway
+# strips the suffix, resolves the base server, and merges the effort params.
+REASONING_EFFORTS = ("low", "medium", "high", "xhigh")
+
+
+def split_virtual_model(model_name: str, efforts: frozenset[str] | tuple | set | None = None) -> tuple[str, str | None]:
+    """Split a model name into (base_name, effort_suffix).
+
+    `efforts` defaults to the recognized value set; when a server's configured
+    efforts differ, pass them so only configured suffixes are treated as virtual.
+    Returns (base, None) if the name has no recognized effort suffix.
+    """
+    recognized = REASONING_EFFORTS if efforts is None else tuple(efforts)
+    if ":" in model_name:
+        base, _, suffix = model_name.rpartition(":")
+        if suffix in recognized:
+            return base, suffix
+    return model_name, None
+
+
+def effective_reasoning_efforts(srv: SubserverConfig) -> list[str]:
+    """The reasoning-effort values to expose as virtual models.
+
+    = user-enabled efforts ∩ model-supported efforts. If the user enabled
+    efforts but the model supports none, returns [] (no virtual models).
+    """
+    enabled = srv.reasoning_efforts
+    if not enabled:
+        return []
+    supported = set(srv.supported_reasoning_efforts)
+    if not supported:
+        return []
+    return [e for e in enabled if e in supported]
+
 
 def init_registry(config: AppConfig) -> None:
     global _registry
@@ -36,6 +71,7 @@ def rebuild_registry() -> None:
             url=f"http://127.0.0.1:{s.port}",
             context_length=s.context_window or 4096,
             parallel=s.parallel or 1,
+            reasoning_efforts=s.reasoning_efforts,
         )
     for s in ucfg.remote_servers:
         merged.setdefault(
@@ -63,6 +99,8 @@ def rebuild_registry() -> None:
             srv.reachable = True
             srv.upstream_model_id = old.upstream_model_id
             srv.upstream_meta = old.upstream_meta
+            srv.vision = old.vision
+            srv.supported_reasoning_efforts = old.supported_reasoning_efforts
             srv.size = srv.size or old.size
             if srv.parameter_size == "unknown":
                 srv.parameter_size = old.parameter_size
@@ -73,10 +111,12 @@ def rebuild_registry() -> None:
 
 
 def get_subserver(model_name: str) -> SubserverConfig:
+    # Resolve virtual reasoning-effort models (e.g. "name:high") to the base server.
+    base, _ = split_virtual_model(model_name)
     # First try the configured name, then fall back to the probed upstream model id.
-    srv = _registry.get(model_name)
+    srv = _registry.get(base)
     if srv is None:
-        srv = next((s for s in _registry.values() if s.upstream_model_id == model_name), None)
+        srv = next((s for s in _registry.values() if s.upstream_model_id == base), None)
     if srv is None:
         raise HTTPException(status_code=404, detail={"error": "model not found"})
     return srv

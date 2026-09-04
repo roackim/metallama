@@ -34,22 +34,31 @@ async def list_models() -> JSONResponse:
             except (httpx.ConnectError, httpx.TimeoutException):
                 continue
             # Server is up but probe may have missed it at startup — re-probe lazily
-            if srv.context_length == _DEFAULT_CONTEXT_LENGTH:
+            # if it has never successfully returned an upstream model id.
+            if srv.context_length == _DEFAULT_CONTEXT_LENGTH or not srv.upstream_model_id:
                 await probe_one(srv, client)
-            model_name = srv.upstream_model_id or srv.name
-            models.append(
-                {
-                    "id": model_name,
-                    "object": "model",
-                    "created": 1704067200,
-                    "owned_by": "metallama",
-                    "meta": {
-                        **srv.upstream_meta,
-                        "n_ctx": srv.context_length,
-                    },
-                    "context_length": srv.context_length,
-                }
-            )
+            model_name = srv.name
+            base_entry = {
+                "id": model_name,
+                "object": "model",
+                "created": 1704067200,
+                "owned_by": "metallama",
+                "meta": {
+                    **srv.upstream_meta,
+                    "n_ctx": srv.context_length,
+                    "vision": srv.vision,
+                },
+                "context_length": srv.context_length,
+            }
+            # Virtual reasoning-effort models (e.g. "name:low", "name:high"),
+            # derived from the server's effective (enabled ∩ supported) efforts.
+            from ..registry import effective_reasoning_efforts
+            effective_efforts = effective_reasoning_efforts(srv)
+            if not effective_efforts:
+                models.append(base_entry)
+            for effort in effective_efforts:
+                vname = f"{model_name}:{effort}"
+                models.append({**base_entry, "id": vname})
     return JSONResponse({"object": "list", "data": models})
 
 
@@ -63,6 +72,13 @@ async def chat_completions(request: Request) -> StreamingResponse | JSONResponse
     body: dict[str, Any] = await request.json()
     model = body.get("model", "")
     srv = get_subserver(model)
+    # Strip any virtual reasoning-effort suffix and inject the effort params.
+    from ..registry import split_virtual_model
+    base_model, effort = split_virtual_model(model)
+    body["model"] = base_model
+    if effort:
+        from .ollama import _apply_reasoning_effort
+        _apply_reasoning_effort(body, body, model)
     stream = body.get("stream", False)
 
     if stream:

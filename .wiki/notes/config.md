@@ -57,6 +57,18 @@ Distant servers, hand-edited by humans. Each entry:
 `metallama/app/ollama/config.yaml` holds a legacy `subservers` list. It is still read
 as a fallback source for the gateway registry, but unified config wins on name conflicts.
 
+## GPU tracking config (`.metallama_gpu_config.json`)
+
+A small JSON file at the repo root (next to `config.yaml`) records which GPUs the user
+has opted out of tracking in the VRAM panel. It holds an `excluded_gpus` list; the
+default (empty list) means all GPUs are tracked. Written atomically by
+`POST /api/system/vram/gpus/toggle` and read on every VRAM request, so edits persist
+across restarts.
+
+```json
+{ "excluded_gpus": ["card2"] }
+```
+
 ## Loading & Caching
 
 - `unified_config.load_unified_config()` loads and caches the config (keyed by resolved path).

@@ -37,6 +37,8 @@ class ManagedServer(BaseModel):
     parallel: int = 1
     extra_args: list[str] = Field(default_factory=list)
     auto_start: bool = False
+    # Reasoning effort levels to expose as virtual models (e.g. ["low", "high"]).
+    reasoning_efforts: list[str] = Field(default_factory=list)
 
     @property
     def effective_display_name(self) -> str:
@@ -328,6 +330,10 @@ def save_unified_config(config: UnifiedConfig, path: str | Path | None = None) -
                     lines.append(f"      - {arg}")
             else:
                 lines.append("    extra_args: []")
+            if server.reasoning_efforts:
+                lines.append("    reasoning_efforts:")
+                for effort in server.reasoning_efforts:
+                    lines.append(f"      - {effort}")
         lines.append("")
 
         # --- remote_servers ---

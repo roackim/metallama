@@ -44,29 +44,48 @@ async def list_tags() -> JSONResponse:
                     continue
             except (httpx.ConnectError, httpx.TimeoutException):
                 continue
-            # Server is up but probe may have missed it at startup — re-probe lazily
-            if srv.context_length == _DEFAULT_CONTEXT_LENGTH:
+            # Server is up but probe may have missed it at startup — re-probe
+            # lazily if we never successfully probed it (no upstream model id).
+            if srv.context_length == _DEFAULT_CONTEXT_LENGTH or not srv.upstream_model_id:
                 await probe_one(srv, client)
             arch = srv.upstream_meta.get("general.architecture", srv.family)
             quant = srv.upstream_meta.get("quantization", "unknown")
-            model_name = srv.upstream_model_id or srv.name
-            models.append(
-                {
-                    "name": model_name,
-                    "model": model_name,
-                    "modified_at": "2025-01-01T00:00:00Z",
-                    "size": srv.size,
-                    "digest": _digest(model_name),
-                    "details": {
-                        "format": "gguf",
-                        "family": arch,
-                        "families": [arch],
-                        "parameter_size": srv.parameter_size,
-                        "quantization_level": quant,
-                        "context_length": srv.context_length,
-                    },
-                }
-            )
+            model_name = srv.name
+            families = [arch]
+            capabilities = ["completion"]
+            if srv.vision:
+                capabilities.append("vision")
+                families.append("clip")
+            base_entry = {
+                "name": model_name,
+                "model": model_name,
+                "modified_at": "2025-01-01T00:00:00Z",
+                "size": srv.size,
+                "digest": _digest(model_name),
+                "details": {
+                    "format": "gguf",
+                    "family": arch,
+                    "families": families,
+                    "parameter_size": srv.parameter_size,
+                    "quantization_level": quant,
+                    "context_length": srv.context_length,
+                },
+                "capabilities": capabilities,
+            }
+            # Virtual reasoning-effort models (e.g. "name:low", "name:high"),
+            # derived from the server's effective (enabled ∩ supported) efforts.
+            from ..registry import effective_reasoning_efforts
+            effective_efforts = effective_reasoning_efforts(srv)
+            if not effective_efforts:
+                models.append(base_entry)
+            for effort in effective_efforts:
+                vname = f"{model_name}:{effort}"
+                models.append({
+                    **base_entry,
+                    "name": vname,
+                    "model": vname,
+                    "digest": _digest(vname),
+                })
     return JSONResponse({"models": models})
 
 
@@ -83,7 +102,7 @@ async def list_running() -> JSONResponse:
             try:
                 resp = await client.get(f"{srv.url}/health", timeout=_HEALTH_TIMEOUT)
                 if resp.status_code == 200:
-                    model_name = srv.upstream_model_id or srv.name
+                    model_name = srv.name
                     running.append(
                         {
                             "name": model_name,
@@ -122,10 +141,19 @@ async def version() -> JSONResponse:
 @router.post("/api/show")
 async def show(req: OllamaShowRequest) -> JSONResponse:
     srv = get_subserver(req.model_name)
+    # Re-probe lazily if we never successfully probed this server.
+    if not srv.upstream_model_id:
+        async with shared_client() as client:
+            await probe_one(srv, client)
     arch = srv.upstream_meta.get("general.architecture", srv.family)
     n_embd = srv.upstream_meta.get("n_embd", 4096)
     quant = srv.upstream_meta.get("quantization", "unknown")
-    model_name = srv.upstream_model_id or srv.name
+    model_name = srv.name
+    families = [arch]
+    capabilities = ["completion", "tools"]
+    if srv.vision:
+        capabilities.append("vision")
+        families.append("clip")
     model_info = {
         "general.architecture": arch,
         "general.parameter_count": srv.parameter_size,
@@ -140,7 +168,7 @@ async def show(req: OllamaShowRequest) -> JSONResponse:
                 "parent_model": "",
                 "format": "gguf",
                 "family": arch,
-                "families": [arch],
+                "families": families,
                 "parameter_size": srv.parameter_size,
                 "quantization_level": quant,
                 "context_length": srv.context_length,
@@ -149,7 +177,7 @@ async def show(req: OllamaShowRequest) -> JSONResponse:
             "model_info": model_info,
             "modelinfo": model_info,
             "parameters": f"num_ctx {srv.context_length}\nstop \"<|im_end|>\"",
-            "capabilities": ["completion", "tools"],
+            "capabilities": capabilities,
         }
     )
 
@@ -177,8 +205,83 @@ def _translate_options(options: dict[str, Any] | None) -> dict[str, Any]:
     return {_OPTION_MAP[k]: v for k, v in options.items() if k in _OPTION_MAP}
 
 
+# Reasoning effort → llama-server reasoning_effort + reasoning_budget.
+# "none"/0 disables thinking; high = unrestricted (-1).
+# Qwen 3.x supports low / medium / high / xhigh.
+_REASONING_EFFORT_MAP: dict[str, tuple[str, int]] = {
+    "none": ("none", 0),
+    "low": ("low", 1024),
+    "medium": ("medium", 4096),
+    "high": ("high", -1),
+    "xhigh": ("xhigh", -1),
+}
+
+
+def _extract_reasoning_effort(body: dict[str, Any]) -> str | None:
+    """Pull a reasoning_effort value from the request body.
+
+    Sources, in priority order:
+    - top-level `reasoning_effort`
+    - `options.reasoning_effort`
+    """
+    top = body.get("reasoning_effort")
+    if top is not None:
+        return str(top).lower()
+    options = body.get("options")
+    if isinstance(options, dict):
+        val = options.get("reasoning_effort")
+        if val is not None:
+            return str(val).lower()
+    return None
+
+
+def _apply_reasoning_effort(payload: dict[str, Any], body: dict[str, Any], model_name: str | None = None) -> None:
+    """Map a client reasoning_effort onto the llama-server payload.
+
+    The effort can come from (in priority order):
+    1. the virtual model name suffix (e.g. "name:high")
+    2. top-level `reasoning_effort`
+    3. `options.reasoning_effort`
+
+    Sets `reasoning_effort`, `reasoning_budget`, and `chat_template_kwargs`
+    so both string and token-budget strategies are covered for template
+    compatibility.
+    """
+    raw = None
+    # 1. Virtual model suffix takes priority.
+    if model_name:
+        from ..registry import split_virtual_model
+        _, suffix = split_virtual_model(model_name)
+        if suffix:
+            raw = suffix
+    # 2/3. Explicit body/options effort.
+    if raw is None:
+        raw = _extract_reasoning_effort(body)
+    if raw is None:
+        return
+    # Accept numeric 0 as "none".
+    if raw == "0":
+        raw = "none"
+    # Known values map to a budget; unknown values pass through as-is so
+    # llama-server can accept model-specific efforts (e.g. "xhigh").
+    if raw in _REASONING_EFFORT_MAP:
+        effort, budget = _REASONING_EFFORT_MAP[raw]
+    else:
+        effort, budget = raw, -1
+    payload["reasoning_effort"] = effort
+    payload["reasoning_budget"] = budget
+    kwargs = dict(payload.get("chat_template_kwargs") or {})
+    kwargs["reasoning_effort"] = effort
+    payload["chat_template_kwargs"] = kwargs
+
+
 def _ollama_message_to_openai(m: Any) -> dict[str, Any]:
-    """Convert an Ollama chat message to OpenAI shape (tool calls included)."""
+    """Convert an Ollama chat message to OpenAI shape (tool calls included).
+
+    Ollama sends images as a list of base64 strings in `images`. llama-server's
+    OpenAI endpoint expects multimodal content parts (`image_url` with a
+    `data:image/...;base64,...` URL). We convert when images are present.
+    """
     out: dict[str, Any] = {"role": m.role, "content": m.content or ""}
     if m.role == "tool":
         # OpenAI wants tool_call_id; Ollama clients send tool_name (and
@@ -200,7 +303,18 @@ def _ollama_message_to_openai(m: Any) -> dict[str, Any]:
             })
         out["tool_calls"] = calls
     if m.images:
-        out["images"] = m.images
+        # Convert base64 images to OpenAI multimodal content parts.
+        content_parts: list[dict[str, Any]] = []
+        if m.content:
+            content_parts.append({"type": "text", "text": m.content})
+        for img in m.images:
+            # If the client already sent a data: URL, pass it through.
+            if isinstance(img, str) and img.startswith("data:"):
+                url = img
+            else:
+                url = f"data:image/jpeg;base64,{img}"
+            content_parts.append({"type": "image_url", "image_url": {"url": url}})
+        out["content"] = content_parts
     return out
 
 
@@ -264,6 +378,16 @@ async def _stream_chat(model: str, resp: httpx.Response) -> AsyncIterator[str]:
                 "done": False,
             }) + "\n"
 
+        # Reasoning deltas (llama-server streams reasoning_content separately).
+        reasoning = delta.get("reasoning_content", "")
+        if reasoning:
+            yield json.dumps({
+                "model": model,
+                "created_at": _now(),
+                "message": {"role": "assistant", "content": "", "reasoning": reasoning},
+                "done": False,
+            }) + "\n"
+
         for frag in delta.get("tool_calls") or []:
             idx = frag.get("index", 0)
             slot = pending_calls.setdefault(idx, {"id": None, "name": "", "arguments": ""})
@@ -299,8 +423,13 @@ async def _stream_chat(model: str, resp: httpx.Response) -> AsyncIterator[str]:
 @router.post("/api/chat", response_model=None)
 async def chat(req: OllamaChatRequest) -> StreamingResponse | JSONResponse:
     srv = get_subserver(req.model)
+    body = req.model_dump(exclude_none=True)
+    # Resolve the base model name (strip any virtual reasoning-effort suffix)
+    # so llama-server receives the real model id, not "name:xhigh".
+    from ..registry import split_virtual_model
+    base_model, _ = split_virtual_model(req.model)
     payload: dict[str, Any] = {
-        "model": req.model,
+        "model": base_model,
         "messages": [_ollama_message_to_openai(m) for m in req.messages],
         "stream": req.stream,
         **_translate_options(req.options),
@@ -309,6 +438,7 @@ async def chat(req: OllamaChatRequest) -> StreamingResponse | JSONResponse:
         payload["tools"] = req.tools
     if req.format == "json":
         payload["response_format"] = {"type": "json_object"}
+    _apply_reasoning_effort(payload, body, req.model)
 
     if req.stream:
         async def generate() -> AsyncIterator[bytes]:
@@ -343,6 +473,10 @@ async def chat(req: OllamaChatRequest) -> StreamingResponse | JSONResponse:
     choice = data.get("choices", [{}])[0]
     message = choice.get("message", {})
     out_message: dict[str, Any] = {"role": "assistant", "content": message.get("content") or ""}
+    # Expose reasoning content (llama-server returns it as reasoning_content).
+    reasoning = message.get("reasoning_content")
+    if reasoning:
+        out_message["reasoning"] = reasoning
     if message.get("tool_calls"):
         out_message["tool_calls"] = _openai_tool_calls_to_ollama(message["tool_calls"])
     usage = data.get("usage", {})
@@ -379,8 +513,10 @@ async def _stream_generate(model: str, resp: httpx.Response) -> AsyncIterator[st
 @router.post("/api/generate", response_model=None)
 async def generate_endpoint(req: OllamaGenerateRequest) -> StreamingResponse | JSONResponse:
     srv = get_subserver(req.model)
+    from ..registry import split_virtual_model
+    base_model, _ = split_virtual_model(req.model)
     payload = {
-        "model": req.model,
+        "model": base_model,
         "prompt": req.prompt,
         "stream": req.stream,
         **_translate_options(req.options),

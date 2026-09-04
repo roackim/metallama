@@ -22,9 +22,9 @@ loading. Fans out requests to all registered llama.cpp servers.
 | `rebuild_registry()` | registry.py | Merges managed + remote + legacy subservers; carries over probed metadata by URL |
 | `get_subserver()` | registry.py | Looks up a subserver by name or probed upstream model id |
 | `get_all_subservers()` | registry.py | Returns all registered subservers |
-| `probe_one()` | probe.py | Probes a single subserver and backfills metadata in place |
+| `probe_one()` | probe.py | Probes a single subserver and backfills metadata in place (incl. `vision` from `/props` → `modalities.vision`) |
 | `probe_subservers()` | probe.py | Probes all subservers (called at startup) |
-| `SubserverConfig` | schemas.py | Pydantic model for a gateway subserver |
+| `SubserverConfig` | schemas.py | Pydantic model for a gateway subserver (incl. `vision` flag) |
 | `AppConfig` | schemas.py | Root config model holding a list of subservers |
 | `OllamaChatRequest` / `OllamaGenerateRequest` / `OllamaShowRequest` | schemas.py | Ollama request schemas |
 | `OpenAIChatRequest` / `OpenAICompletionRequest` / `OpenAIEmbeddingRequest` | schemas.py | OpenAI passthrough schemas |

@@ -53,8 +53,8 @@ compatible gateway. The frontend is a vanilla JS single-page app with no build s
 - `hf_routes.py` exposes `/api/hf/*` endpoints.
 
 ### System monitoring
-- `gpu.py` queries VRAM via nvidia-smi / rocm-smi / amd-smi.
-- `main.py` aggregates VRAM/RAM into bounded history deques (500 samples) served via `/api/system/*`.
+- `gpu.py` queries VRAM via nvidia-smi / rocm-smi / amd-smi (with absolute-path fallbacks for systemd's restricted PATH).
+- `main.py` stores per-GPU VRAM history in bounded deques (500 samples) keyed by GPU id (`vram_gpu_history`). The aggregate total graph is computed on-demand from the per-GPU histories of currently-tracked GPUs, so untracking a GPU also removes its past data from the total. RAM history is a single bounded deque. Served via `/api/system/*`.
 
 ## Cross-Cutting Concerns
 

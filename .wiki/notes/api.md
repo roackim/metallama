@@ -69,22 +69,27 @@ and an OpenAI-compatible gateway (`/ollama/v1/*`). Mutating endpoints are guarde
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/tags` | List healthy models with details |
+| GET | `/api/tags` | List healthy models with details. Vision models include `"vision"` in `capabilities` and `"clip"` in `families` |
 | GET | `/api/ps` | List running (healthy) models |
 | GET | `/api/version` | Gateway version |
-| POST | `/api/show` | Model info/details |
-| POST | `/api/chat` | Chat (streaming NDJSON or JSON) |
+| POST | `/api/show` | Model info/details. Vision models include `"vision"` capability + `"clip"` family |
+| POST | `/api/chat` | Chat (streaming NDJSON or JSON). Accepts `reasoning_effort` (top-level or `options`); base64 `images` converted to OpenAI multimodal content parts |
 | POST | `/api/generate` | Generate (streaming NDJSON or JSON) |
 | POST | `/api/pull` | Stubbed — not supported |
 | POST | `/api/push` | Stubbed — not supported |
 | POST | `/api/copy` | Stubbed — not supported |
 | POST | `/api/delete` | Stubbed — not supported |
 
+**Reasoning effort** (`/api/chat`): `reasoning_effort` may be sent top-level or in
+`options`. Values map to llama-server `reasoning_effort` + `reasoning_budget`:
+`none`/`0` → `none`/0, `low` → `low`/1024, `medium` → `medium`/4096, `high` → `high`/-1.
+Also injected into `chat_template_kwargs`.
+
 ## OpenAI Gateway (`/ollama/v1/*`)
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/v1/models` | List healthy models |
+| GET | `/v1/models` | List healthy models (meta includes `vision`) |
 | POST | `/v1/chat/completions` | Passthrough (streaming or JSON) |
 | POST | `/v1/completions` | Passthrough |
 | POST | `/v1/embeddings` | Passthrough |

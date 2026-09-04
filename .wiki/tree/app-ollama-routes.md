@@ -24,9 +24,11 @@ routers are mounted at `/ollama` in `main.py`.
 | `pull()` / `push()` / `copy()` / `delete()` | ollama.py | Stubbed management endpoints (return "not supported") |
 | `_stream_chat()` | ollama.py | Translates OpenAI SSE stream → Ollama NDJSON (accumulates tool-call fragments) |
 | `_stream_generate()` | ollama.py | Translates OpenAI SSE stream → Ollama generate NDJSON |
-| `_ollama_message_to_openai()` | ollama.py | Converts an Ollama chat message to OpenAI shape (tool calls included) |
+| `_ollama_message_to_openai()` | ollama.py | Converts an Ollama chat message to OpenAI shape (tool calls + base64 images → multimodal content parts) |
 | `_openai_tool_calls_to_ollama()` | ollama.py | Converts OpenAI tool_calls back to Ollama shape |
-| `list_models()` | openai.py | `GET /v1/models` — lists healthy models |
+| `_extract_reasoning_effort()` | ollama.py | Pulls `reasoning_effort` from top-level body or `options` |
+| `_apply_reasoning_effort()` | ollama.py | Maps reasoning_effort → llama-server `reasoning_effort` + `reasoning_budget` + `chat_template_kwargs` |
+| `list_models()` | openai.py | `GET /v1/models` — lists healthy models (meta includes `vision`) |
 | `chat_completions()` | openai.py | `POST /v1/chat/completions` — passthrough (streaming or JSON) |
 | `completions()` | openai.py | `POST /v1/completions` — passthrough |
 | `embeddings()` | openai.py | `POST /v1/embeddings` — passthrough |

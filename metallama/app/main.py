@@ -1082,6 +1082,13 @@ async def update_model_config(model_name: str, payload: dict[str, Any] = Body(..
             raise HTTPException(status_code=400, detail="mmproj must be a string")
         updates["mmproj"] = mmproj.strip()
 
+    # Validate and collect reasoning_efforts if provided
+    if "reasoning_efforts" in payload:
+        efforts = payload["reasoning_efforts"]
+        if not isinstance(efforts, list) or not all(isinstance(e, str) for e in efforts):
+            raise HTTPException(status_code=400, detail="reasoning_efforts must be a list of strings")
+        updates["reasoning_efforts"] = [e.strip().lower() for e in efforts if e.strip()]
+
     if updates:
         # Update config.yaml (machine-managed section)
         update_managed_server(model_name, updates)

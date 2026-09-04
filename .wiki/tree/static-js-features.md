@@ -10,7 +10,7 @@ One ES module per UI feature. Each exports a `setup*` function called from `main
 | `hf/index.js` | HuggingFace search panel + download orchestration |
 | `library/index.js` | Local model library: inventory, partial downloads, delete/serve |
 | `connect/index.js` | "Connect" modal with Ollama/OpenAI/curl snippets |
-| `system/index.js` | VRAM/RAM status + history graphs (canvas) |
+| `system/index.js` | VRAM/RAM status + history graphs (canvas); per-GPU VRAM toggles + mini graphs |
 | `theme/index.js` | Dark/light/system theme switcher |
 
 ## Key Classes & Functions
@@ -23,7 +23,8 @@ One ES module per UI feature. Each exports a `setup*` function called from `main
 | `refreshLibrary()` | library/index.js | Refreshes the local model library list |
 | `setupConnect()` | connect/index.js | Wires the connect modal + snippet generation |
 | `refreshVram()` / `refreshRam()` | system/index.js | Poll VRAM/RAM status |
-| `refreshVramGraph()` / `refreshRamGraph()` | system/index.js | Draw history graphs on canvas |
+| `refreshVramGraph()` / `refreshRamGraph()` | system/index.js | Draw history graphs on canvas (aggregate + per-GPU) |
+| `renderGpuList()` | system/index.js | Renders per-GPU toggle rows (tracked first, untracked dimmed at bottom with graph hidden) |
 | `setupThemeSwitcher()` | theme/index.js | Applies and persists theme preference |
 
 ## See Also

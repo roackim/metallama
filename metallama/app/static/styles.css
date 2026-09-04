@@ -2256,3 +2256,50 @@ body.admin-locked .disabled-readonly {
 .vram-gpu.untracked .vram-gpu-graph {
   display: none;
 }
+
+/* ── Edit modal form hint ──────────────────────────────── */
+.form-hint {
+  margin-top: 0.25rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+  line-height: 1.3;
+}
+.form-hint code {
+  font-family: ui-monospace, monospace;
+  background: rgba(128, 128, 128, 0.15);
+  padding: 0 0.2em;
+  border-radius: 3px;
+}
+
+/* ── Reasoning efforts read-only display ──────────────── */
+.reasoning-efforts-display {
+  padding: 0.45rem 0.6rem;
+  background: rgba(128, 128, 128, 0.1);
+  border: 1px solid rgba(128, 128, 128, 0.25);
+  border-radius: 4px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+  color: var(--text);
+}
+
+/* ── Reasoning-effort checkboxes in edit modal ─────────── */
+.reasoning-effort-checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.9rem;
+  margin-top: 0.35rem;
+}
+.reasoning-effort-checkboxes label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.reasoning-effort-checkboxes input[type="checkbox"] {
+  accent-color: var(--blue);
+  cursor: pointer;
+}
+.reasoning-effort-checkboxes .form-hint {
+  width: 100%;
+}

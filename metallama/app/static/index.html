@@ -159,6 +159,15 @@
                 <p id="edit-mmproj-warning" class="model-not-found-warning is-hidden"></p>
               </div>
               <div class="form-group managed-only">
+                <label class="vram-gpu-toggle" for="edit-reasoning-enabled">
+                  <input type="checkbox" id="edit-reasoning-enabled" />
+                  <span>Expose reasoning-effort models</span>
+                </label>
+                <div id="edit-reasoning-efforts" class="reasoning-effort-checkboxes">
+                  <p class="form-hint">Check the effort levels to expose as virtual models (e.g. <code>name:low</code>).</p>
+                </div>
+              </div>
+              <div class="form-group managed-only">
                 <label for="edit-port">Port</label>
                 <input type="number" id="edit-port" min="1024" max="65535" />
               </div>

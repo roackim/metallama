@@ -230,12 +230,60 @@ function clearModalFields() {
   document.getElementById("edit-context-window").value = "";
   document.getElementById("edit-parallel").value = "";
   document.getElementById("edit-extra-args").value = "";
+  const reasoningEnabled = document.getElementById("edit-reasoning-enabled");
+  if (reasoningEnabled) reasoningEnabled.checked = false;
+  const reasoningEfforts = document.getElementById("edit-reasoning-efforts");
+  if (reasoningEfforts) reasoningEfforts.innerHTML = "";
   const warning = document.getElementById("edit-model-warning");
   if (warning) warning.classList.add("is-hidden");
   const mtpWarning = document.getElementById("edit-model-draft-warning");
   if (mtpWarning) mtpWarning.classList.add("is-hidden");
   const mmprojWarning = document.getElementById("edit-mmproj-warning");
   if (mmprojWarning) mmprojWarning.classList.add("is-hidden");
+}
+
+// Populate the reasoning-effort checkboxes from the model's supported efforts
+// and the currently-enabled set.
+function populateReasoningEfforts(supported, enabled) {
+  const container = document.getElementById("edit-reasoning-efforts");
+  const master = document.getElementById("edit-reasoning-enabled");
+  if (!container || !master) return;
+  const enabledSet = new Set(enabled || []);
+  const supportedList = supported && supported.length ? supported : ["low", "medium", "high", "xhigh"];
+  container.innerHTML = supportedList
+    .map((effort) => `
+      <label>
+        <input type="checkbox" data-effort="${effort}" ${enabledSet.has(effort) ? "checked" : ""} />
+        <span>${effort}</span>
+      </label>
+    `)
+    .join("");
+  master.checked = (enabled && enabled.length > 0);
+  // Toggling the master enables/disables the per-effort checkboxes.
+  const setDisabled = () => {
+    container.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+      cb.disabled = !master.checked;
+    });
+  };
+  master.addEventListener("change", () => {
+    if (master.checked) {
+      container.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+        cb.checked = true;
+      });
+    }
+    setDisabled();
+  });
+  setDisabled();
+}
+
+// Read the reasoning-effort checkboxes. Returns [] if the master toggle is off.
+function collectReasoningEfforts() {
+  const master = document.getElementById("edit-reasoning-enabled");
+  const container = document.getElementById("edit-reasoning-efforts");
+  if (!master || !container || !master.checked) return [];
+  return [...container.querySelectorAll('input[type="checkbox"]:checked')]
+    .map((cb) => cb.dataset.effort)
+    .filter(Boolean);
 }
 
 function openEditModal(modelId, isManaged) {
@@ -267,6 +315,7 @@ function openEditModal(modelId, isManaged) {
       document.getElementById("edit-context-window").value = data.context_window || "";
       document.getElementById("edit-parallel").value = data.parallel || "";
       document.getElementById("edit-extra-args").value = (data.extra_args || []).join("\n");
+      populateReasoningEfforts(data.supported_reasoning_efforts, data.reasoning_efforts);
       // Populate model selector from available .gguf files
       loadModelFiles().then((mdata) => {
         populateModelSelector(mdata.files || [], data.model_path || "");
@@ -378,9 +427,10 @@ async function doSaveEditModal(restart) {
         .split("\n")
         .map((s) => s.trim())
         .filter(Boolean),
+      reasoning_efforts: collectReasoningEfforts(),
     };
     Object.keys(payload).forEach((key) => {
-      if (key === "extra_args" || key === "name" || key === "model_path" || key === "model_draft" || key === "mmproj") return;
+      if (key === "extra_args" || key === "name" || key === "model_path" || key === "model_draft" || key === "mmproj" || key === "reasoning_efforts") return;
       if (isNaN(payload[key])) delete payload[key];
     });
     if (payload.name === "") delete payload.name;
@@ -765,6 +815,10 @@ function cardTemplate(model) {
   const ctxValue = model.context_window || "";
   const ctxKTokens = ctxValue ? Math.round(ctxValue / 1000) : "";
   const parValue = model.parallel || "";
+  const reasoningEfforts = Array.isArray(model.reasoning_efforts) ? model.reasoning_efforts : [];
+  const reasoningChip = reasoningEfforts.length
+    ? `<span class="info-item reasoning-efforts" title="Enabled reasoning efforts">Reasoning: ${escapeHtml(reasoningEfforts.join(", "))}</span>`
+    : "";
   const slotsHtml = slotIndicators(model);
   const est = model.vram_estimate;
   const estWarn = est && est.likely_fits === false && model.status === "offline";
@@ -783,7 +837,7 @@ function cardTemplate(model) {
   const pidChip = isManaged && model.pid !== undefined
     ? `<span class="info-item">PID ${model.pid ?? "—"}</span>` : "";
   const infoChips = isLLM
-    ? `${pidChip}<span class="info-item">CTX ${ctxKTokens}k</span>${parValue ? `<span class="info-item">×${parValue}</span>` : ""}${estChip}`
+    ? `${pidChip}<span class="info-item">CTX ${ctxKTokens}k</span>${parValue ? `<span class="info-item">×${parValue}</span>` : ""}${reasoningChip}${estChip}`
     : pidChip;
 
   const modelWarning = model.model_found === false

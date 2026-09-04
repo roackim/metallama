@@ -25,6 +25,19 @@ runtime_processes: dict[str, ProcessState] = {}
 model_locks: dict[str, asyncio.Lock] = {key: asyncio.Lock() for key in MODEL_PROFILES}
 
 
+def _supported_reasoning_efforts(model_name: str) -> list[str]:
+    """Return the reasoning-effort values the model's chat template supports.
+
+    Looked up from the gateway registry (populated by probing /props). Falls
+    back to [] if the model isn't in the registry or hasn't been probed yet.
+    """
+    try:
+        from .ollama.registry import get_subserver
+        return list(get_subserver(model_name).supported_reasoning_efforts)
+    except Exception:
+        return []
+
+
 def _get_engine_default_args(engine: str) -> list[str]:
     """Get default CLI args for an engine from unified config."""
     config = load_unified_config()
@@ -51,6 +64,8 @@ def get_profile_with_config(profile: ModelProfile) -> ModelProfile:
         overrides["model_draft"] = server_entry.model_draft
     if server_entry.mmproj != profile.mmproj:
         overrides["mmproj"] = server_entry.mmproj
+    if server_entry.reasoning_efforts != profile.reasoning_efforts:
+        overrides["reasoning_efforts"] = server_entry.reasoning_efforts
 
     return replace(profile, **overrides) if overrides else profile
 
@@ -362,6 +377,8 @@ async def model_payload(profile: ModelProfile) -> dict[str, Any]:
         "extra_args": profile.extra_args,
         "model_draft": profile.model_draft,
         "mmproj": profile.mmproj,
+        "reasoning_efforts": profile.reasoning_efforts,
+        "supported_reasoning_efforts": _supported_reasoning_efforts(profile.name),
         "model_found": model_found,
         "managed": True,
         "last_exit": get_unexpected_exit(profile.name) if status == "offline" else None,

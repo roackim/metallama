@@ -52,11 +52,15 @@ It also handles auth state (login modal, admin toggle) and the binary-missing wa
   is persisted in `localStorage` (`metallama.theme`), defaulting to `system`.
 - **Graphs**: `features/system/index.js` draws VRAM/RAM history on `<canvas>` with
   HiDPI-aware sizing.
-- **Per-GPU VRAM**: `features/system/index.js` renders one toggleable row per GPU
-  (checkbox + live value + mini graph) inside `#vram-gpus`. Untracked GPUs are
-  excluded from the aggregate total. Toggling calls
-  `POST /api/system/vram/gpus/toggle`; the tracked set is persisted server-side in
-  `.metallama_gpu_config.json`.
+- **Per-GPU VRAM**: `features/system/index.js` renders the aggregate VRAM total graph
+  first, then a collapsible "Individual GPUs" section (`#vram-gpus-toggle` +
+  `#vram-gpus`). Each GPU has a toggleable row (checkbox + live value + mini graph).
+  Untracked GPUs are dimmed, moved to the bottom of the list, and their graph is
+  hidden. Toggling calls `POST /api/system/vram/gpus/toggle`; the tracked set is
+  persisted server-side in `.metallama_gpu_config.json`. The collapsible section's
+  open/closed state is persisted in `localStorage` (`metallama.gpusSectionOpen`).
+  The total graph is computed on-demand from the per-GPU histories of currently
+  tracked GPUs, so untracking a GPU also removes its past data from the total.
 
 ## See Also
 - [Architecture](architecture.md)

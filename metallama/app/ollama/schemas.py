@@ -15,6 +15,16 @@ class SubserverConfig(BaseModel):
     upstream_model_id: Optional[str] = None
     upstream_meta: dict[str, Any] = Field(default_factory=dict)
     reachable: bool = False
+    # Whether the upstream model supports vision (multimodal projector / mmproj).
+    # Detected from llama-server's /props -> modalities.vision during probing.
+    vision: bool = False
+    # Reasoning-effort values the model's chat template actually supports,
+    # inferred from /props -> chat_template during probing (e.g. ["low","xhigh"]).
+    supported_reasoning_efforts: list[str] = Field(default_factory=list)
+    # Reasoning-effort values the user has ENABLED as virtual models
+    # (e.g. ["low", "xhigh"]). Empty = virtual efforts disabled entirely.
+    # The effective set exposed is enabled ∩ supported.
+    reasoning_efforts: list[str] = Field(default_factory=list)
 
 
 class AppConfig(BaseModel):

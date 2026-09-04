@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import httpx
@@ -8,6 +9,39 @@ from .registry import get_all_subservers
 from .schemas import SubserverConfig
 
 _PROBE_TIMEOUT = httpx.Timeout(3.0)
+
+# Known reasoning-effort values (ordered by increasing effort). Used to filter
+# values inferred from a chat template so we only surface recognized levels.
+KNOWN_REASONING_EFFORTS = ("none", "low", "medium", "high", "xhigh")
+
+
+def _infer_reasoning_efforts(chat_template: str) -> list[str]:
+    """Infer the reasoning-effort values a chat template supports.
+
+    Scans the Jinja template for string literals compared against
+    `reasoning_effort` / `resolved_reasoning_effort` (e.g.
+    `reasoning_effort == 'high'`, `not in ('xhigh', 'medium', 'low')`).
+    Returns recognized values in canonical order. Empty if the template
+    doesn't reference reasoning effort at all.
+    """
+    if not chat_template:
+        return []
+    found: set[str] = set()
+    # Single-value comparisons: reasoning_effort == 'high'
+    for m in re.finditer(
+        r"(?:resolved_)?reasoning_effort\s*(?:==|!=|in|not\s+in)\s*\(?['\"]([a-zA-Z0-9_]+)['\"]",
+        chat_template,
+    ):
+        found.add(m.group(1))
+    # Tuple/list forms: not in ('xhigh', 'medium', 'low')
+    for m in re.finditer(
+        r"(?:resolved_)?reasoning_effort\s*(?:in|not\s+in)\s*\(([^)]*)\)",
+        chat_template,
+    ):
+        for lit in re.findall(r"['\"]([a-zA-Z0-9_]+)['\"]", m.group(1)):
+            found.add(lit)
+    # Keep only recognized values, in canonical order.
+    return [v for v in KNOWN_REASONING_EFFORTS if v in found]
 
 
 def _fallback_arch(current_family: str) -> str:
@@ -69,6 +103,15 @@ async def probe_one(srv: SubserverConfig, client: httpx.AsyncClient) -> None:
             props_payload = r_props.json()
             if isinstance(props_payload, dict):
                 props_ctx = _extract_props_context_length(props_payload, srv.parallel)
+                # Vision capability: llama-server reports modalities.vision when a
+                # multimodal projector (mmproj) is loaded.
+                modalities = props_payload.get("modalities")
+                if isinstance(modalities, dict):
+                    srv.vision = bool(modalities.get("vision"))
+                # Infer which reasoning-effort values the chat template supports.
+                srv.supported_reasoning_efforts = _infer_reasoning_efforts(
+                    props_payload.get("chat_template") or ""
+                )
     except (httpx.ConnectError, httpx.TimeoutException, ValueError):
         pass
 
