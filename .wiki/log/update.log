@@ -48,3 +48,5 @@
 [2026-09-04T10:11:44Z] UPDATED system GPU usage — fixed N/A utilization parsing, hid utilization graphs for unchecked GPUs, and added tracked-only aggregate GPU usage history/graph.
 [2026-09-04T10:17:40Z] UPDATED system metric labels — aggregate VRAM and GPU usage labels now use TOTAL VRAM and TOTAL GPU USAGE when multiple GPUs are detected.
 [2026-09-04T10:18:22Z] FIXED aggregate labels — TOTAL VRAM and TOTAL GPU USAGE now depend on more than one checked/tracked GPU, not physical GPU count.
+[2026-09-04T10:26:10Z] UPDATED Model Library table UI — added Hide/Show label, compact collapsed panel, explicit table header, right-aligned dates, and tighter row presentation.
+[2026-09-04T10:42:51Z] UPDATED server cards — removed VRAM estimation chip and start warning; moved enabled reasoning efforts to the title second line.

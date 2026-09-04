@@ -816,20 +816,7 @@ function cardTemplate(model) {
   const ctxKTokens = ctxValue ? Math.round(ctxValue / 1000) : "";
   const parValue = model.parallel || "";
   const reasoningEfforts = Array.isArray(model.reasoning_efforts) ? model.reasoning_efforts : [];
-  const reasoningChip = reasoningEfforts.length
-    ? `<span class="info-item reasoning-efforts" title="Enabled reasoning efforts">Reasoning: ${escapeHtml(reasoningEfforts.join(", "))}</span>`
-    : "";
   const slotsHtml = slotIndicators(model);
-  const est = model.vram_estimate;
-  const estWarn = est && est.likely_fits === false && model.status === "offline";
-  const estTitle = est
-    ? `Estimated VRAM: weights ≈ ${est.weights_gb} GB + KV cache ≈ ${est.kv_cache_gb} GB + ~1 GB overhead.` +
-      (est.free_vram_gb != null ? ` Free VRAM: ${est.free_vram_gb} GB.` : "") +
-      (estWarn ? " Likely won't fit — reduce context, parallel slots, or use a smaller quant." : "")
-    : "";
-  const estChip = est
-    ? `<span class="info-item vram-est${estWarn ? " warn" : ""}" title="${escapeHtml(estTitle)}">≈${est.total_gb} GB${estWarn ? " ⚠" : ""}</span>`
-    : "";
   const autoStartChip = isManaged
     ? `<label class="autostart-check admin-only" title="${model.auto_start ? "Auto-start on launch · click to disable" : "Auto-start on launch · currently off — click to enable"}"><input type="checkbox" data-id="${model.id}" data-action="autostart" ${model.auto_start ? "checked" : ""}><span>auto-start</span></label>`
     : "";
@@ -837,7 +824,7 @@ function cardTemplate(model) {
   const pidChip = isManaged && model.pid !== undefined
     ? `<span class="info-item">PID ${model.pid ?? "—"}</span>` : "";
   const infoChips = isLLM
-    ? `${pidChip}<span class="info-item">CTX ${ctxKTokens}k</span>${parValue ? `<span class="info-item">×${parValue}</span>` : ""}${reasoningChip}${estChip}`
+    ? `${pidChip}<span class="info-item">CTX ${ctxKTokens}k</span>${parValue ? `<span class="info-item">×${parValue}</span>` : ""}`
     : pidChip;
 
   const modelWarning = model.model_found === false
@@ -849,7 +836,7 @@ function cardTemplate(model) {
       <div class="card-header-row">
         <div class="title-wrap">
           <h3>${model.display_name}</h3>
-          ${stem ? `<span class="card-model-stem">${escapeHtml(stem)}</span>` : ""}
+          ${stem || reasoningEfforts.length ? `<span class="card-model-stem">${stem ? escapeHtml(stem) : ""}${reasoningEfforts.length ? ` ${escapeHtml(reasoningEfforts.join(", "))}` : ""}</span>` : ""}
         </div>
         <div class="header-badges">
           <span class="locality-badge ${isManaged ? "local" : "remote"}">${isManaged ? "Local" : "Remote"}</span>
@@ -1049,24 +1036,6 @@ async function startStop(modelId, action) {
     return restartModel(modelId);
   }
 
-  if (action === "start") {
-    try {
-      const m = await api(`/api/models/${encodeURIComponent(modelId)}/status`);
-      const est = m.vram_estimate;
-      if (est && est.likely_fits === false) {
-        const ok = window.confirm(
-          `This model is estimated to need ≈${est.total_gb} GB VRAM ` +
-          `(weights ${est.weights_gb} GB + KV cache ${est.kv_cache_gb} GB), ` +
-          `but only ${est.free_vram_gb} GB is free.\n\n` +
-          `It will likely fail to load or run partially on CPU. Start anyway?`
-        );
-        if (!ok) return;
-      }
-    } catch {
-      // estimate unavailable — proceed
-    }
-  }
-
   inFlight.set(modelId, action);
   await refreshModels();
   try {
@@ -1125,19 +1094,8 @@ export function setupModels() {
 
     try {
       if (action === "copy") {
-        if (!url) {
-          throw new Error("Missing URL");
-        }
-        await copyToClipboard(url);
-        setConfigMessage("Endpoint copied");
-        return;
-      }
-
-      if (action === "cmd") {
-        const data = await api(`/api/models/${modelId}/command`);
-        await copyToClipboard(data.command);
-        setCardError(modelId, "");
-        setConfigMessage("Launch command copied to clipboard");
+        await copyToClipboard(target.dataset.text || "");
+        setConfigMessage("Copied to clipboard");
         return;
       }
 

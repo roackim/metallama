@@ -81,11 +81,19 @@
             <div class="panel-head-left">
               <h2 class="side-title">Model Library</h2>
             </div>
+            <button id="library-toggle" class="vram-gpus-toggle library-toggle" type="button" aria-label="Collapse model library" title="Collapse model library" aria-expanded="true">
+              <span class="vram-gpus-toggle-caret">▾</span>
+              <span class="library-toggle-label">Hide</span>
+            </button>
           </div>
-          <div id="library-downloading" class="library-downloading is-hidden"></div>
-          <h3 id="library-list-title" class="side-subtitle is-hidden">Downloaded models</h3>
-          <div id="library-list" class="library-list"></div>
-          <p id="library-empty" class="library-empty is-hidden">No models downloaded yet — search HuggingFace to get started.</p>
+          <div id="library-content">
+            <div id="library-downloading" class="library-downloading is-hidden"></div>
+            <div class="library-table-head" aria-hidden="true">
+              <span>Model</span><span>Actions</span><span>Date</span>
+            </div>
+            <div id="library-list" class="library-list"></div>
+            <p id="library-empty" class="library-empty is-hidden">No models downloaded yet — search HuggingFace to get started.</p>
+          </div>
         </section>
       </section>
 

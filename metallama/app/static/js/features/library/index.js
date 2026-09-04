@@ -10,24 +10,17 @@ function escapeHtml(s) {
   return d.innerHTML;
 }
 
-function formatGb(gb) {
-  return gb >= 10 ? Math.round(gb) + " GB" : gb.toFixed(1) + " GB";
-}
-
 function modelItem(m) {
   const hasServer = (m.servers || []).length > 0;
   const dotTitle = hasServer
     ? `Served by: ${m.servers.join(", ")}`
     : "No server configured for this model";
-  const metaBits = [m.params, m.arch, formatGb(m.size_gb)].filter(Boolean).join(" · ");
   return `
     <div class="library-item" title="${escapeHtml(m.rel_path)}">
       <span class="library-dot ${hasServer ? "served" : ""}" title="${escapeHtml(dotTitle)}"></span>
       <div class="library-item-body">
         <span class="library-item-name">${escapeHtml(m.name)}</span>
-        <span class="library-item-meta">${escapeHtml(metaBits)}</span>
       </div>
-      <span class="library-item-date" title="Downloaded">${escapeHtml(m.downloaded_at || "")}</span>
       <div class="library-item-actions">
         ${hasServer
           ? `<span class="library-action-spacer"></span>`
@@ -35,6 +28,7 @@ function modelItem(m) {
         <button class="btn-secondary btn-small library-rename admin-only" data-rel="${escapeHtml(m.rel_path)}" data-name="${escapeHtml(m.name)}" title="Rename this model file">Rename</button>
         <button class="btn-danger btn-small library-delete admin-only" data-rel="${escapeHtml(m.rel_path)}" data-name="${escapeHtml(m.name)}" title="Permanently delete this model file">Delete</button>
       </div>
+      <span class="library-item-date" title="Downloaded">${escapeHtml(m.downloaded_at || "")}</span>
     </div>`;
 }
 
@@ -49,7 +43,6 @@ function partialItem(p) {
         <div class="library-partial-track"><div class="library-partial-fill" style="width: ${width}%"></div></div>
         <span class="library-item-meta">${pct} downloaded${canResume ? "" : " · re-download the same file to resume"}</span>
       </div>
-      <span class="library-item-date" title="Downloaded">${escapeHtml(p.downloaded_at || "")}</span>
       <div class="library-partial-actions">
         ${canResume
           ? `<button class="btn-primary btn-small library-resume admin-only" data-repo="${escapeHtml(p.repo_id)}" data-file="${escapeHtml(p.filename)}" data-name="${escapeHtml(p.name)}" title="Continue this download">Resume</button>`
@@ -57,6 +50,7 @@ function partialItem(p) {
         <button class="btn-secondary btn-small library-rename admin-only" data-rel="${escapeHtml(p.rel_path)}" data-name="${escapeHtml(p.name)}" title="Rename this partial download">Rename</button>
         <button class="btn-secondary btn-small library-discard admin-only" data-rel="${escapeHtml(p.rel_path)}" title="Delete the partial file${canResume ? "" : " (source unknown — re-download from search)"}">Discard</button>
       </div>
+      <span class="library-item-date" title="Downloaded">${escapeHtml(p.downloaded_at || "")}</span>
     </div>`;
 }
 
@@ -64,7 +58,6 @@ export async function refreshLibrary() {
   const listEl = document.getElementById("library-list");
   const dlEl = document.getElementById("library-downloading");
   const emptyEl = document.getElementById("library-empty");
-  const listTitle = document.getElementById("library-list-title");
   if (!listEl) return;
 
   let data;
@@ -101,11 +94,9 @@ function renderLibrary(models, partials) {
   const listEl = document.getElementById("library-list");
   const dlEl = document.getElementById("library-downloading");
   const emptyEl = document.getElementById("library-empty");
-  const listTitle = document.getElementById("library-list-title");
   if (!listEl) return;
 
   listEl.innerHTML = models.map(modelItem).join("");
-  listTitle?.classList.toggle("is-hidden", models.length === 0);
   emptyEl?.classList.toggle("is-hidden", models.length > 0 || partials.length > 0);
 
   if (partials.length) {
@@ -178,6 +169,22 @@ async function renameItem(relPath, name, isPartial) {
 export function setupLibrary() {
   const panel = document.getElementById("library-panel");
   if (!panel) return;
+  const toggle = document.getElementById("library-toggle");
+  const content = document.getElementById("library-content");
+  const storageKey = "metallama.librarySectionOpen";
+  const setOpen = (open) => {
+    localStorage.setItem(storageKey, open ? "1" : "0");
+    toggle?.setAttribute("aria-expanded", open ? "true" : "false");
+    const caret = toggle?.querySelector(".vram-gpus-toggle-caret");
+    if (caret) caret.textContent = open ? "▾" : "▸";
+    const label = toggle?.querySelector(".library-toggle-label");
+    if (label) label.textContent = open ? "Hide" : "Show";
+    toggle?.setAttribute("aria-label", `${open ? "Hide" : "Show"} model library`);
+    toggle?.setAttribute("title", `${open ? "Hide" : "Show"} model library`);
+    content?.classList.toggle("collapsed", !open);
+  };
+  toggle?.addEventListener("click", () => setOpen(localStorage.getItem(storageKey) !== "1"));
+  setOpen(localStorage.getItem(storageKey) !== "0");
 
   // Press tracking so refreshLibrary() defers its DOM swap mid-click.
   panel.addEventListener("pointerdown", () => { libraryPressCount++; });

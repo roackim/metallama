@@ -15,16 +15,6 @@ const GRAPH_FILL_OPACITY = 0.25;
 
 // Per-GPU graph state: gpuId -> { canvas, usageCanvas }
 const gpuGraphs = new Map();
-// GPU palette (cycled per GPU index)
-const GPU_COLORS = [
-  { line: "#60a5fa", fill: `rgba(96, 165, 250, ${GRAPH_FILL_OPACITY})` },
-  { line: "#34d399", fill: `rgba(52, 211, 153, ${GRAPH_FILL_OPACITY})` },
-  { line: "#fbbf24", fill: `rgba(251, 191, 36, ${GRAPH_FILL_OPACITY})` },
-  { line: "#f472b6", fill: `rgba(244, 114, 182, ${GRAPH_FILL_OPACITY})` },
-  { line: "#a78bfa", fill: `rgba(167, 139, 250, ${GRAPH_FILL_OPACITY})` },
-  { line: "#f87171", fill: `rgba(248, 113, 113, ${GRAPH_FILL_OPACITY})` },
-];
-
 // Collapsible "Individual GPUs" section. Persisted in localStorage.
 const GPUS_SECTION_KEY = "metallama.gpusSectionOpen";
 function isGpusSectionOpen() {
@@ -140,6 +130,22 @@ function drawVramGraph(history) {
   drawGraph(vramGraphEl, history, colors);
 }
 
+function gpuVramColors() {
+  const isDark = document.documentElement.dataset.theme === "dark";
+  return {
+    line: isDark ? "#60a5fa" : "#2563eb",
+    fill: isDark ? `rgba(96, 165, 250, ${GRAPH_FILL_OPACITY})` : `rgba(37, 99, 235, ${GRAPH_FILL_OPACITY})`,
+  };
+}
+
+function gpuUsageColors() {
+  const isDark = document.documentElement.dataset.theme === "dark";
+  return {
+    line: isDark ? "#a78bfa" : "#7c3aed",
+    fill: isDark ? `rgba(167, 139, 250, ${GRAPH_FILL_OPACITY})` : `rgba(124, 58, 237, ${GRAPH_FILL_OPACITY})`,
+  };
+}
+
 function drawRamGraph(history) {
   const isDark = document.documentElement.dataset.theme === "dark";
   const colors = {
@@ -167,13 +173,13 @@ function renderGpuList(gpus) {
 
   vramGpusEl.innerHTML = sorted
     .map((gpu, i) => {
-      const colors = GPU_COLORS[i % GPU_COLORS.length];
       return `
         <div class="vram-gpu ${gpu.tracked ? "" : "untracked"}" data-gpu-id="${gpu.id}">
           <label class="vram-gpu-toggle" title="${gpu.tracked ? "Click to stop tracking this GPU" : "Click to track this GPU"}">
             <input type="checkbox" data-gpu-id="${gpu.id}" ${gpu.tracked ? "checked" : ""} />
             <span class="vram-gpu-name">${gpu.id}</span>
             <span class="vram-gpu-val">${gpu.used_gb.toFixed(1)} / ${gpu.total_gb.toFixed(1)} GB</span>
+            <span class="vram-gpu-usage-val">${gpu.usage_percent == null ? "--" : `${gpu.usage_percent.toFixed(0)}%`}</span>
           </label>
           <div class="system-graph-wrap">
             <div class="system-metric-name">VRAM usage</div>
@@ -249,6 +255,8 @@ export async function refreshVram() {
         if (row) {
           const val = row.querySelector(".vram-gpu-val");
           if (val) val.textContent = `${gpu.used_gb.toFixed(1)} / ${gpu.total_gb.toFixed(1)} GB`;
+          const usageVal = row.querySelector(".vram-gpu-usage-val");
+          if (usageVal) usageVal.textContent = gpu.usage_percent == null ? "--" : `${gpu.usage_percent.toFixed(0)}%`;
         }
       });
     }
@@ -292,26 +300,17 @@ export async function refreshVramGraph() {
       drawVramGraph(data.history);
     }
     if (data.gpu_usage_history && data.gpu_usage_history.length > 0) {
-      const isDark = document.documentElement.dataset.theme === "dark";
-      drawGraph(gpuUsageGraphEl, data.gpu_usage_history, {
-        line: isDark ? "#34d399" : "#059669",
-        fill: isDark ? `rgba(52, 211, 153, ${GRAPH_FILL_OPACITY})` : `rgba(5, 150, 105, ${GRAPH_FILL_OPACITY})`,
-      });
+      drawGraph(gpuUsageGraphEl, data.gpu_usage_history, gpuUsageColors());
     }
     const gpuHist = data.gpus || {};
-    const ids = [...gpuGraphs.keys()];
     for (const [id, entry] of gpuGraphs) {
       const hist = gpuHist[id] || [];
       if (hist.length > 0) {
-        const idx = ids.indexOf(id);
-        const colors = GPU_COLORS[idx % GPU_COLORS.length];
-        drawGraph(entry.canvas, hist, colors);
+        drawGraph(entry.canvas, hist, gpuVramColors());
       }
       const usageHist = (data.gpu_usage || {})[id] || [];
       if (entry.usageCanvas && usageHist.length > 0) {
-        const idx = ids.indexOf(id);
-        const colors = GPU_COLORS[idx % GPU_COLORS.length];
-        drawGraph(entry.usageCanvas, usageHist, colors);
+        drawGraph(entry.usageCanvas, usageHist, gpuUsageColors());
       }
     }
   } catch {
