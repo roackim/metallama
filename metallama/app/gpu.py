@@ -86,7 +86,7 @@ def _run(cmd: list[str]) -> str:
 def _query_nvidia(tool: str = "nvidia-smi") -> list[dict[str, float]]:
     out = _run([
         tool,
-        "--query-gpu=index,memory.used,memory.total",
+        "--query-gpu=index,memory.used,memory.total,utilization.gpu",
         "--format=csv,noheader,nounits",
     ])
     gpus = []
@@ -100,10 +100,15 @@ def _query_nvidia(tool: str = "nvidia-smi") -> list[dict[str, float]]:
                 # .split()[0] strips units if nounits is ignored by older drivers
                 used_mb = float(parts[1].strip().split()[0])
                 total_mb = float(parts[2].strip().split()[0])
+                usage_text = parts[3].strip().split()[0] if len(parts) >= 4 else ""
+                usage = float(usage_text) if usage_text not in ("", "N/A") else None
             except (ValueError, IndexError) as exc:
                 logger.warning("nvidia-smi: failed to parse line %r: %s", line, exc)
                 continue
-            gpus.append({"id": f"gpu{idx}", "used_mb": used_mb, "total_mb": total_mb})
+            gpu = {"id": f"gpu{idx}", "used_mb": used_mb, "total_mb": total_mb}
+            if usage is not None:
+                gpu["usage_percent"] = usage
+            gpus.append(gpu)
     if not gpus:
         logger.warning("nvidia-smi: no GPUs parsed from output:\n%s", out[:500])
     return gpus
@@ -112,6 +117,16 @@ def _query_nvidia(tool: str = "nvidia-smi") -> list[dict[str, float]]:
 def _query_rocm(tool: str = "rocm-smi") -> list[dict[str, float]]:
     out = _run([tool, "--showmeminfo", "vram", "--json"])
     data = json.loads(out)
+    usage_by_card: dict[str, float] = {}
+    try:
+        usage_data = json.loads(_run([tool, "--showuse", "--json"]))
+        for card, entry in usage_data.items():
+            if isinstance(entry, dict):
+                usage = entry.get("GPU use (%)")
+                if usage is not None:
+                    usage_by_card[card] = float(str(usage).rstrip("%"))
+    except (RuntimeError, ValueError, TypeError):
+        logger.debug("rocm-smi utilization query unavailable", exc_info=True)
     gpus = []
     for card in sorted(data):
         entry = data[card]
@@ -121,11 +136,17 @@ def _query_rocm(tool: str = "rocm-smi") -> list[dict[str, float]]:
         used = entry.get("VRAM Total Used Memory (B)")
         if total is None or used is None:
             continue
-        gpus.append({
+        gpu = {
             "id": card,  # e.g. "card0", "card1"
             "used_mb": float(used) / (1024**2),
             "total_mb": float(total) / (1024**2),
-        })
+        }
+        usage = entry.get("GPU use (%)") or entry.get("GPU Usage (%)")
+        if usage is not None:
+            gpu["usage_percent"] = float(str(usage).rstrip("%"))
+        if card in usage_by_card:
+            gpu["usage_percent"] = usage_by_card[card]
+        gpus.append(gpu)
     return gpus
 
 
@@ -156,7 +177,12 @@ def _query_amd(tool: str = "amd-smi") -> list[dict[str, float]]:
         if gpu_id is None:
             gpu_id = len(gpus)
         # amd-smi reports MB
-        gpus.append({"id": f"gpu{gpu_id}", "used_mb": float(used), "total_mb": float(total)})
+        gpu = {"id": f"gpu{gpu_id}", "used_mb": float(used), "total_mb": float(total)}
+        usage_data = entry.get("usage", {})
+        usage = usage_data.get("gfx_activity", {}).get("value") if isinstance(usage_data, dict) and isinstance(usage_data.get("gfx_activity"), dict) else None
+        if usage is not None:
+            gpu["usage_percent"] = float(usage)
+        gpus.append(gpu)
     return gpus
 
 
@@ -240,5 +266,6 @@ def vram_status() -> dict[str, Any]:
             "used_mb": int(used_mb),
             "total_mb": int(total_mb),
             "percent": round((used_mb / total_mb * 100) if total_mb > 0 else 0, 1),
+            "usage_percent": g.get("usage_percent"),
         })
     return {"available": True, "gpus": gpus, "tool": tool}

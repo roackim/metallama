@@ -1890,7 +1890,7 @@ body.admin-locked .disabled-readonly {
 .system-graph {
   display: block;
   width: 100%;
-  height: 60px;
+  height: 72px;
   border: var(--border-size) solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--bg);
@@ -2217,7 +2217,7 @@ body.admin-locked .disabled-readonly {
   color: var(--muted);
 }
 .vram-gpu-graph {
-  height: 40px;
+  height: 72px;
 }
 
 /* ── Collapsible "Individual GPUs" section ─────────────── */
@@ -2254,6 +2254,10 @@ body.admin-locked .disabled-readonly {
   opacity: 0.55;
 }
 .vram-gpu.untracked .vram-gpu-graph {
+  display: none;
+}
+
+.vram-gpu.untracked .gpu-usage-graph {
   display: none;
 }
 
@@ -2303,3 +2307,26 @@ body.admin-locked .disabled-readonly {
 .reasoning-effort-checkboxes .form-hint {
   width: 100%;
 }
+
+/* ── Graph time axis ───────────────────────────────────── */
+.system-graph-wrap {
+  width: 100%;
+}
+.system-time-axis {
+  position: relative;
+  height: 1.15rem;
+  margin-top: 0.22rem;
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+  font-size: 0.65rem;
+  line-height: 1;
+  pointer-events: none;
+}
+.system-time-axis span {
+  position: absolute;
+  top: 0;
+  white-space: nowrap;
+}
+.system-time-start { left: 0.25rem; }
+.system-time-middle { left: 50%; transform: translateX(-50%); }
+.system-time-end { right: 0.25rem; }

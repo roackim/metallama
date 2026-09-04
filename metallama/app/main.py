@@ -75,11 +75,13 @@ app.include_router(hf_router)
 # Server-side history storage (500 samples at 1s = ~8 minutes)
 MAX_HISTORY_SAMPLES = 500
 ram_history: deque[dict[str, Any]] = deque(maxlen=MAX_HISTORY_SAMPLES)
+cpu_history: deque[dict[str, Any]] = deque(maxlen=MAX_HISTORY_SAMPLES)
 
 # Per-GPU VRAM history, keyed by GPU id (e.g. "card0", "gpu0").
 # The aggregate total graph is derived from these on-demand (see
 # get_vram_history), so it only reflects currently-tracked GPUs.
 vram_gpu_history: dict[str, deque[dict[str, Any]]] = {}
+gpu_usage_history: dict[str, deque[dict[str, Any]]] = {}
 
 # Which GPUs are tracked (persisted). Default: all.
 _GPU_CONFIG_PATH = Path(__file__).resolve().parents[2] / ".metallama_gpu_config.json"
@@ -193,16 +195,21 @@ def get_vram_status() -> dict[str, Any]:
     # the total graph.
     excluded = _excluded_gpu_ids()
     if gpus:
+        sample_timestamp = int(time.time() * 1000)
         for gpu in gpus:
             gid = gpu.get("id", "")
             if gid:
                 hist = vram_gpu_history.setdefault(gid, deque(maxlen=MAX_HISTORY_SAMPLES))
                 hist.append({
-                    "timestamp": int(time.time() * 1000),
+                    "timestamp": sample_timestamp,
                     "percent": gpu["percent"],
                     "used_gb": gpu["used_gb"],
                     "total_gb": gpu["total_gb"],
                 })
+                usage = gpu.get("usage_percent")
+                if usage is not None:
+                    usage_hist = gpu_usage_history.setdefault(gid, deque(maxlen=MAX_HISTORY_SAMPLES))
+                    usage_hist.append({"timestamp": sample_timestamp, "percent": usage})
 
     # Annotate each GPU with whether it's tracked.
     for gpu in gpus:
@@ -264,6 +271,9 @@ def get_vram_history() -> dict[str, Any]:
     aggregate = []
     for ts in sorted(by_ts):
         samples = by_ts[ts]
+        # A missing GPU sample must create a gap, not a partial low total.
+        if len(samples) != len(tracked_ids):
+            continue
         total_used = sum(s[0] for s in samples)
         total_max = sum(s[1] for s in samples)
         if total_max <= 0:
@@ -275,9 +285,21 @@ def get_vram_history() -> dict[str, Any]:
             "total_gb": round(total_max, 2),
         })
 
+    usage_by_ts: dict[int, list[float]] = {}
+    for gid in tracked_ids:
+        for sample in gpu_usage_history.get(gid, []):
+            usage_by_ts.setdefault(sample["timestamp"], []).append(sample["percent"])
+    usage_aggregate = [
+        {"timestamp": ts, "percent": round(sum(values) / len(values), 1)}
+        for ts, values in sorted(usage_by_ts.items())
+        if len(values) == len(tracked_ids)
+    ]
+
     return {
         "history": aggregate,
         "gpus": {gid: list(hist) for gid, hist in vram_gpu_history.items()},
+        "gpu_usage": {gid: list(hist) for gid, hist in gpu_usage_history.items()},
+        "gpu_usage_history": usage_aggregate,
     }
 
 
@@ -315,6 +337,26 @@ def get_ram_status() -> dict[str, Any]:
 def get_ram_history() -> dict[str, Any]:
     """Get RAM usage history."""
     return {"history": list(ram_history)}
+
+
+@app.get("/api/system/cpu")
+def get_cpu_status() -> dict[str, Any]:
+    """Get current system CPU usage."""
+    try:
+        import psutil
+        percent = round(psutil.cpu_percent(interval=None), 1)
+        cpu_history.append({"timestamp": int(time.time() * 1000), "percent": percent})
+        return {"available": True, "percent": percent}
+    except ImportError:
+        return {"error": "psutil not installed", "available": False}
+    except Exception as exc:
+        return {"error": str(exc), "available": False}
+
+
+@app.get("/api/system/cpu/history")
+def get_cpu_history() -> dict[str, Any]:
+    """Get CPU usage history."""
+    return {"history": list(cpu_history)}
 
 
 @app.get("/api/ports/suggest")

@@ -5,7 +5,7 @@ import { setupModels, refreshModels } from "./features/models/index.js";
 import { setupHfSearch } from "./features/hf/index.js";
 import { setupLibrary } from "./features/library/index.js";
 import { setupConnect } from "./features/connect/index.js";
-import { refreshRam, refreshRamGraph, refreshVram, refreshVramGraph } from "./features/system/index.js";
+import { refreshCpu, refreshCpuGraph, refreshRam, refreshRamGraph, refreshVram, refreshVramGraph } from "./features/system/index.js";
 import { setupThemeSwitcher } from "./features/theme/index.js";
 
 function showBinaryWarning(binaries) {
@@ -38,6 +38,7 @@ async function init() {
   setupThemeSwitcher(() => {
     refreshVramGraph().catch(() => {});
     refreshRamGraph().catch(() => {});
+    refreshCpuGraph().catch(() => {});
   });
 
   setupModels();
@@ -136,10 +137,12 @@ async function init() {
   await refreshRam();
   await refreshVramGraph();
   await refreshRamGraph();
+  await refreshCpu();
+  await refreshCpuGraph();
 
   setInterval(() => {
     refreshModels().catch(() => {});
-  }, 2000);
+  }, 1000);
 
   setInterval(() => {
     verifyToken().catch(() => {});
@@ -150,6 +153,8 @@ async function init() {
     refreshRam().catch(() => {});
     refreshVramGraph().catch(() => {});
     refreshRamGraph().catch(() => {});
+    refreshCpu().catch(() => {});
+    refreshCpuGraph().catch(() => {});
   }, 1000);
 }
 

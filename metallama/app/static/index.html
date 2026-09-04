@@ -94,17 +94,38 @@
           <h2 class="side-title">System</h2>
           <div class="system-metric">
             <div class="system-metric-head">
-              <span class="system-metric-name">RAM</span>
-              <span id="ram-status" class="system-metric-value">--</span>
+              <span class="system-metric-name">CPU</span>
+              <span id="cpu-status" class="system-metric-value">--</span>
             </div>
-            <canvas id="ram-graph" class="system-graph" width="400" height="60"></canvas>
+            <div class="system-graph-wrap">
+              <canvas id="cpu-graph" class="system-graph" width="400" height="60"></canvas>
+              <div class="system-time-axis" aria-hidden="true"></div>
+            </div>
           </div>
           <div class="system-metric">
             <div class="system-metric-head">
-              <span class="system-metric-name">VRAM</span>
+              <span class="system-metric-name">RAM</span>
+              <span id="ram-status" class="system-metric-value">--</span>
+            </div>
+            <div class="system-graph-wrap">
+              <canvas id="ram-graph" class="system-graph" width="400" height="60"></canvas>
+              <div class="system-time-axis" aria-hidden="true"></div>
+            </div>
+          </div>
+          <div class="system-metric">
+            <div class="system-metric-head">
+              <span id="vram-name" class="system-metric-name">VRAM</span>
               <span id="vram-status" class="system-metric-value">--</span>
             </div>
-            <canvas id="vram-graph" class="system-graph" width="400" height="60"></canvas>
+            <div class="system-graph-wrap">
+              <canvas id="vram-graph" class="system-graph" width="400" height="60"></canvas>
+              <div class="system-time-axis" aria-hidden="true"></div>
+            </div>
+            <div class="system-graph-wrap">
+              <div id="gpu-usage-name" class="system-metric-name">GPU usage</div>
+              <canvas id="gpu-usage-graph" class="system-graph" width="400" height="60"></canvas>
+              <div class="system-time-axis" aria-hidden="true"></div>
+            </div>
             <button id="vram-gpus-toggle" class="vram-gpus-toggle" type="button" aria-expanded="true">
               <span class="vram-gpus-toggle-caret">▾</span>
               <span>Individual GPUs</span>
