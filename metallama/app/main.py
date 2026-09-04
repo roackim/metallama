@@ -47,6 +47,9 @@ async def lifespan(app: FastAPI):
     # inference (JSON parsing, HTTP buffers) don't inflate RSS permanently.
     trim_task = asyncio.create_task(periodic_malloc_trim(30.0))
     try:
+        # FastAPI skips @app.on_event handlers when a custom lifespan is used.
+        # Run probing and configured model auto-start explicitly here.
+        await startup_tasks()
         yield
     finally:
         trim_task.cancel()

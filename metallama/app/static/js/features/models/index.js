@@ -831,7 +831,7 @@ function cardTemplate(model) {
     ? `<span class="info-item vram-est${estWarn ? " warn" : ""}" title="${escapeHtml(estTitle)}">≈${est.total_gb} GB${estWarn ? " ⚠" : ""}</span>`
     : "";
   const autoStartChip = isManaged
-    ? `<label class="autostart-check admin-only" title="${model.auto_start ? "Auto-start on launch · click to disable" : "Auto-start on launch · currently off — click to enable"}"><input type="checkbox" data-id="${model.id}" data-action="autostart" ${model.auto_start ? "checked" : ""}><span>auto</span></label>`
+    ? `<label class="autostart-check admin-only" title="${model.auto_start ? "Auto-start on launch · click to disable" : "Auto-start on launch · currently off — click to enable"}"><input type="checkbox" data-id="${model.id}" data-action="autostart" ${model.auto_start ? "checked" : ""}><span>auto-start</span></label>`
     : "";
 
   const pidChip = isManaged && model.pid !== undefined
