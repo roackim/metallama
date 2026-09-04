@@ -5,13 +5,14 @@ const vramNameEl = document.getElementById("vram-name");
 const vramGraphEl = document.getElementById("vram-graph");
 const gpuUsageGraphEl = document.getElementById("gpu-usage-graph");
 const gpuUsageNameEl = document.getElementById("gpu-usage-name");
+const gpuUsageStatusEl = document.getElementById("gpu-usage-status");
 const vramGpusEl = document.getElementById("vram-gpus");
 const vramGpusToggleEl = document.getElementById("vram-gpus-toggle");
 const ramStatusEl = document.getElementById("ram-status");
 const ramGraphEl = document.getElementById("ram-graph");
 const cpuStatusEl = document.getElementById("cpu-status");
 const cpuGraphEl = document.getElementById("cpu-graph");
-const GRAPH_FILL_OPACITY = 0.25;
+const GRAPH_FILL_OPACITY = 0;
 
 // Per-GPU graph state: gpuId -> { canvas, usageCanvas }
 const gpuGraphs = new Map();
@@ -52,21 +53,21 @@ function drawGraph(canvas, history, colors, axisLabel = "") {
   const plotHeight = height;
   ctx.clearRect(0, 0, width, height);
 
-  const isDark = document.documentElement.dataset.theme === "dark";
-  const gridColor = isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.1)";
-
-  ctx.strokeStyle = gridColor;
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
   ctx.lineWidth = 1;
-  [0.25, 0.5, 0.75, 1.0].forEach((pct) => {
-    const y = plotHeight - pct * (plotHeight - 2 * padding) - padding;
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(width, y);
-    ctx.stroke();
-  });
+  const midpointY = plotHeight - 0.5 * (plotHeight - 2 * padding) - padding;
+  ctx.beginPath();
+  ctx.moveTo(0, midpointY);
+  ctx.lineTo(width, midpointY);
+  ctx.stroke();
 
   const numSamples = history.length;
-  const points = history.map((sample, index) => {
+  const smoothedHistory = history.map((sample, index) => {
+    const previous = history[Math.max(0, index - 1)].percent;
+    const next = history[Math.min(history.length - 1, index + 1)].percent;
+    return { ...sample, percent: (previous + sample.percent * 2 + next) / 4 };
+  });
+  const points = smoothedHistory.map((sample, index) => {
     // The visible history is a moving window: oldest sample at the left,
     // newest sample at the right, with no unused lead-in space.
     const x = numSamples > 1 ? (index / (numSamples - 1)) * width : width;
@@ -98,16 +99,16 @@ function drawGraph(canvas, history, colors, axisLabel = "") {
   ctx.fill();
 
   ctx.strokeStyle = colors.line;
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 3;
   ctx.beginPath();
   drawSmoothPath();
   ctx.stroke();
 
   // Render the moving time axis outside the bordered canvas.
   const timePoints = [
-    { sample: history[0], position: "start" },
-    { sample: history[Math.floor((numSamples - 1) / 2)], position: "middle" },
-    { sample: history[numSamples - 1], position: "end" },
+    { sample: smoothedHistory[0], position: "start" },
+    { sample: smoothedHistory[Math.floor((numSamples - 1) / 2)], position: "middle" },
+    { sample: smoothedHistory[numSamples - 1], position: "end" },
   ];
   const timeAxis = canvas.parentElement?.querySelector(".system-time-axis");
   if (timeAxis) timeAxis.innerHTML = timePoints.map(({ sample, position }) => {
@@ -122,35 +123,31 @@ function drawGraph(canvas, history, colors, axisLabel = "") {
 }
 
 function drawVramGraph(history) {
-  const isDark = document.documentElement.dataset.theme === "dark";
   const colors = {
-    line: isDark ? "#60a5fa" : "#2563eb",
-    fill: isDark ? `rgba(96, 165, 250, ${GRAPH_FILL_OPACITY})` : `rgba(37, 99, 235, ${GRAPH_FILL_OPACITY})`,
+    line: "#34d399",
+    fill: `rgba(52, 211, 153, ${GRAPH_FILL_OPACITY})`,
   };
   drawGraph(vramGraphEl, history, colors);
 }
 
 function gpuVramColors() {
-  const isDark = document.documentElement.dataset.theme === "dark";
   return {
-    line: isDark ? "#60a5fa" : "#2563eb",
-    fill: isDark ? `rgba(96, 165, 250, ${GRAPH_FILL_OPACITY})` : `rgba(37, 99, 235, ${GRAPH_FILL_OPACITY})`,
+    line: "#34d399",
+    fill: `rgba(52, 211, 153, ${GRAPH_FILL_OPACITY})`,
   };
 }
 
 function gpuUsageColors() {
-  const isDark = document.documentElement.dataset.theme === "dark";
   return {
-    line: isDark ? "#a78bfa" : "#7c3aed",
-    fill: isDark ? `rgba(167, 139, 250, ${GRAPH_FILL_OPACITY})` : `rgba(124, 58, 237, ${GRAPH_FILL_OPACITY})`,
+    line: "#fb7185",
+    fill: `rgba(251, 113, 133, ${GRAPH_FILL_OPACITY})`,
   };
 }
 
 function drawRamGraph(history) {
-  const isDark = document.documentElement.dataset.theme === "dark";
   const colors = {
-    line: isDark ? "#f59e0b" : "#d97706",
-    fill: isDark ? `rgba(245, 158, 11, ${GRAPH_FILL_OPACITY})` : `rgba(217, 119, 6, ${GRAPH_FILL_OPACITY})`,
+    line: "#fb923c",
+    fill: `rgba(251, 146, 60, ${GRAPH_FILL_OPACITY})`,
   };
   drawGraph(ramGraphEl, history, colors);
 }
@@ -242,8 +239,13 @@ export async function refreshVram() {
     const totalUsed = pool.reduce((sum, gpu) => sum + gpu.used_gb, 0);
     const totalMax = pool.reduce((sum, gpu) => sum + gpu.total_gb, 0);
     const avgPercent = totalMax > 0 ? (totalUsed / totalMax) * 100 : 0;
+    const usageValues = pool.map((gpu) => gpu.usage_percent).filter((value) => value != null);
+    const avgGpuUsage = usageValues.length
+      ? usageValues.reduce((sum, value) => sum + value, 0) / usageValues.length
+      : null;
 
     vramStatusEl.textContent = `${totalUsed.toFixed(1)} / ${totalMax.toFixed(1)} GB · ${avgPercent.toFixed(0)}%`;
+    if (gpuUsageStatusEl) gpuUsageStatusEl.textContent = avgGpuUsage == null ? "--" : `${avgGpuUsage.toFixed(0)}%`;
 
     const sig = data.gpus.map((g) => `${g.id}:${g.tracked}`).join("|");
     if (vramGpusEl && vramGpusEl.dataset.sig !== sig) {
@@ -322,10 +324,9 @@ export async function refreshCpuGraph() {
   try {
     const data = await api("/api/system/cpu/history");
     if (data.history && data.history.length > 0) {
-      const isDark = document.documentElement.dataset.theme === "dark";
       drawGraph(cpuGraphEl, data.history, {
-        line: isDark ? "#a78bfa" : "#7c3aed",
-        fill: isDark ? `rgba(167, 139, 250, ${GRAPH_FILL_OPACITY})` : `rgba(124, 58, 237, ${GRAPH_FILL_OPACITY})`,
+        line: "#60a5fa",
+        fill: `rgba(96, 165, 250, ${GRAPH_FILL_OPACITY})`,
       });
     }
   } catch {

@@ -14,8 +14,6 @@ let logTimer = null;
 const LOG_POLL_INTERVAL = 1000; // ms
 const LOG_TEXT_CAP = 500000; // chars kept per panel
 const slotCache = new Map(); // modelId -> { slots: [...], ts: number }
-let filterText = ""; // server name filter
-let filterStatus = "all"; // all | running | offline
 let lastSlotRefresh = 0;
 const SLOT_REFRESH_INTERVAL = 5000; // ms — avoid hammering /slots during inference
 
@@ -621,7 +619,7 @@ function modelTypeLabel(model) {
 }
 
 function cardAccentColor(managed) {
-  return managed ? "#3B95DD" : "#8B5CF6";
+  return managed ? "#6D5DFC" : "#D946EF";
 }
 
 function modelStem(model) {
@@ -631,7 +629,6 @@ function modelStem(model) {
 }
 
 function slotIndicators(model) {
-  if (model.status !== "online") return "";
   const cached = slotCache.get(model.id);
   const par = model.parallel || 0;
   // Determine how many dots to render: use live slot count if available,
@@ -817,20 +814,13 @@ function cardTemplate(model) {
   const stem = modelStem(model);
 
   const isLLM = type === "LLM";
-  const ctxValue = model.context_window || "";
-  const ctxKTokens = ctxValue ? Math.round(ctxValue / 1000) : "";
-  const parValue = model.parallel || "";
   const reasoningEfforts = Array.isArray(model.reasoning_efforts) ? model.reasoning_efforts : [];
   const slotsHtml = slotIndicators(model);
   const autoStartChip = isManaged
     ? `<label class="autostart-check admin-only" title="${model.auto_start ? "Auto-start on launch · click to disable" : "Auto-start on launch · currently off — click to enable"}"><input type="checkbox" data-id="${model.id}" data-action="autostart" ${model.auto_start ? "checked" : ""}><span>auto-start</span></label>`
     : "";
 
-  const pidChip = isManaged && model.pid !== undefined
-    ? `<span class="info-item">PID ${model.pid ?? "—"}</span>` : "";
-  const infoChips = isLLM
-    ? `${pidChip}<span class="info-item">CTX ${ctxKTokens}k</span>${parValue ? `<span class="info-item">×${parValue}</span>` : ""}`
-    : pidChip;
+  const infoChips = "";
 
   const modelWarning = model.model_found === false
     ? `<p class="model-not-found-warning">Model weights not found locally</p>`
@@ -915,13 +905,7 @@ function renderModels(models) {
   }
   ensureLogTimer();
 
-  const needle = filterText.trim().toLowerCase();
-  const visible = models.filter((m) => {
-    if (needle && !`${m.display_name} ${modelStem(m)}`.toLowerCase().includes(needle)) return false;
-    if (filterStatus === "running") return m.status === "online" || m.status === "starting";
-    if (filterStatus === "offline") return m.status === "offline";
-    return true;
-  });
+  const visible = models;
 
   // Don't swap the DOM mid-press — a swap between mousedown and mouseup
   // suppresses the click event entirely (the "have to click twice" bug).
@@ -1208,24 +1192,6 @@ export function setupModels() {
       }
     });
   }
-
-  // ── Server filter controls ────────────────────────────
-  const filterInput = document.getElementById("server-filter");
-  if (filterInput) {
-    filterInput.addEventListener("input", () => {
-      filterText = filterInput.value;
-      refreshModels().catch(() => {});
-    });
-  }
-  document.querySelectorAll(".status-filter .chip-btn").forEach((chip) => {
-    chip.addEventListener("click", () => {
-      filterStatus = chip.dataset.status || "all";
-      document.querySelectorAll(".status-filter .chip-btn").forEach((c) => {
-        c.classList.toggle("active", c === chip);
-      });
-      refreshModels().catch(() => {});
-    });
-  });
 
   // ── Add Server button ─────────────────────────────────
   const addBtn = document.getElementById("add-model-btn");

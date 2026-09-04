@@ -34,12 +34,7 @@
 
       document.title = `${model} logs — Metallama`;
       titleEl.textContent = model || "(no model)";
-      // Apply saved theme
-      const theme = localStorage.getItem("metallama.theme");
-      const resolved = theme === "system" || !theme
-        ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
-        : theme;
-      document.documentElement.dataset.theme = resolved;
+      document.documentElement.dataset.theme = "dark";
 
       let since = 0;
       let cleared = false;
