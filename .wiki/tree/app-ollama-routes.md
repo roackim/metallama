@@ -15,10 +15,10 @@ routers are mounted at `/ollama` in `main.py`.
 
 | Name | File | What it does |
 |------|------|-------------|
-| `list_tags()` | ollama.py | `GET /api/tags` — lists healthy models with details |
+| `list_tags()` | ollama.py | `GET /api/tags` — lists healthy models plus configured virtual effort variants |
 | `list_running()` | ollama.py | `GET /api/ps` — lists running (healthy) models |
 | `version()` | ollama.py | `GET /api/version` — returns gateway version |
-| `show()` | ollama.py | `POST /api/show` — model info/details |
+| `show()` | ollama.py | `POST /api/show` — model info/details, including vision capability |
 | `chat()` | ollama.py | `POST /api/chat` — translates Ollama chat → OpenAI, streams NDJSON |
 | `generate_endpoint()` | ollama.py | `POST /api/generate` — translates Ollama generate → OpenAI completions |
 | `pull()` / `push()` / `copy()` / `delete()` | ollama.py | Stubbed management endpoints (return "not supported") |
@@ -27,8 +27,8 @@ routers are mounted at `/ollama` in `main.py`.
 | `_ollama_message_to_openai()` | ollama.py | Converts an Ollama chat message to OpenAI shape (tool calls + base64 images → multimodal content parts) |
 | `_openai_tool_calls_to_ollama()` | ollama.py | Converts OpenAI tool_calls back to Ollama shape |
 | `_extract_reasoning_effort()` | ollama.py | Pulls `reasoning_effort` from top-level body or `options` |
-| `_apply_reasoning_effort()` | ollama.py | Maps reasoning_effort → llama-server `reasoning_effort` + `reasoning_budget` + `chat_template_kwargs` |
-| `list_models()` | openai.py | `GET /v1/models` — lists healthy models (meta includes `vision`) |
+| `_apply_reasoning_effort()` | ollama.py | Maps a virtual suffix or request value to llama-server reasoning parameters |
+| `list_models()` | openai.py | `GET /v1/models` — lists healthy models plus configured virtual variants |
 | `chat_completions()` | openai.py | `POST /v1/chat/completions` — passthrough (streaming or JSON) |
 | `completions()` | openai.py | `POST /v1/completions` — passthrough |
 | `embeddings()` | openai.py | `POST /v1/embeddings` — passthrough |

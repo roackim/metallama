@@ -44,6 +44,8 @@ Owned local models, machine-generated/managed by the app. Each entry:
 - `parallel` — number of parallel slots
 - `extra_args` — extra CLI args
 - `auto_start` — whether to start on app startup
+- `mmproj` — optional multimodal projector path
+- `reasoning_efforts` — enabled reasoning levels exposed as virtual gateway models; effective values are limited to those inferred from the model template
 
 ### `remote_servers`
 Distant servers, hand-edited by humans. Each entry:
@@ -68,6 +70,23 @@ across restarts.
 ```json
 { "excluded_gpus": ["card2"] }
 ```
+
+### Virtual reasoning-effort models
+
+Managed servers may enable effort variants in `config.yaml`:
+
+```yaml
+reasoning_efforts:
+  - low
+  - medium
+  - high
+```
+
+An empty list disables virtual effort models. The gateway probes the upstream
+`/props` `chat_template` and infers accepted reasoning values. Only enabled values
+that the template supports are exposed as `name:effort` variants. Selecting a
+variant strips the suffix before upstream forwarding and injects the effort into
+the llama-server request.
 
 ## Loading & Caching
 

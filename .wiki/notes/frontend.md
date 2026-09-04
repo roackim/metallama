@@ -61,6 +61,11 @@ It also handles auth state (login modal, admin toggle) and the binary-missing wa
   open/closed state is persisted in `localStorage` (`metallama.gpusSectionOpen`).
   The total graph is computed on-demand from the per-GPU histories of currently
   tracked GPUs, so untracking a GPU also removes its past data from the total.
+- **Reasoning efforts**: the server edit modal provides a master toggle plus
+  per-effort checkboxes. Enabling the master selects all inferred values; individual
+  values can then be disabled. Server cards display the enabled set as a
+  `Reasoning: ...` chip. Enabled values become virtual `name:effort` models in the
+  Ollama gateway.
 
 ## See Also
 - [Architecture](architecture.md)
