@@ -455,7 +455,6 @@ body {
   align-items: center;
   gap: 0.25rem;
   padding-right: 0.35rem;
-  border-right: var(--border-size) solid var(--line);
 }
 
 .card-ctrl-btn {
