@@ -2718,3 +2718,124 @@ textarea:focus-visible {
   border-color: var(--line-bright);
 }
 
+@media (max-width: 720px) {
+  .container {
+    margin-top: 1rem;
+    padding-inline: 0.65rem;
+  }
+
+  .main-panel {
+    padding: 0.8rem;
+  }
+
+  .panel-head {
+    align-items: flex-start;
+    margin-bottom: 0.75rem;
+  }
+
+  .panel-head-left,
+  .panel-head-right {
+    width: 100%;
+  }
+
+  .panel-head-right {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.35rem;
+  }
+
+  .panel-head-right .header-action {
+    width: 100%;
+    min-width: 0;
+    padding-inline: 0.35rem;
+  }
+
+  .card {
+    padding: 0.75rem;
+    border-left-width: var(--border-size);
+  }
+
+  .card-header-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .title-wrap {
+    width: 100%;
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+
+  .card h3,
+  .card-model-stem {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .header-badges {
+    align-self: flex-start;
+  }
+
+  .card-main-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .endpoint-row {
+    align-items: flex-start;
+  }
+
+  .endpoint-link {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .card-center-col,
+  .card-actions-col {
+    width: 100%;
+    align-items: stretch;
+  }
+
+  .card-controls {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+    padding: 0;
+    border-right: 0;
+  }
+
+  .card-actions-col .app-control {
+    width: 100%;
+  }
+
+  .library-item {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "body body"
+      "date actions";
+    gap: 0.45rem;
+    padding: 0.65rem;
+  }
+
+  .library-item-name {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .library-item-date {
+    align-self: center;
+  }
+
+  .library-item-actions,
+  .library-partial-actions {
+    flex-wrap: wrap;
+    gap: 0.25rem;
+  }
+
+  .library-item-actions .btn-small,
+  .library-partial-actions .btn-small {
+    min-height: 34px;
+    opacity: 0.82;
+    pointer-events: auto;
+  }
+}
+
