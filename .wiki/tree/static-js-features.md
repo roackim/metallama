@@ -6,9 +6,9 @@ One ES module per UI feature. Each exports a `setup*` function called from `main
 
 | File | Purpose |
 |------|---------|
-| `models/index.js` | Model cards: start/stop, logs, slots, edit/create modal, filters |
+| `models/index.js` | Model cards: compact metadata/actions layout, start/stop, logs, slots, edit/create modal, filters |
 | `hf/index.js` | HuggingFace search panel + download orchestration |
-| `library/index.js` | Local model library: inventory, partial downloads, delete/serve |
+| `library/index.js` | Local model library: inventory, partial downloads, compact Serve/Rename/Delete action groups |
 | `connect/index.js` | "Connect" modal with Ollama/OpenAI/curl snippets |
 | `system/index.js` | VRAM/RAM status + history graphs (canvas); per-GPU VRAM toggles + mini graphs |
 | `theme/index.js` | Dark/light/system theme switcher |

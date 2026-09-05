@@ -8,7 +8,7 @@ Static assets served by FastAPI at `/static` and `/` (index.html).
 |------|---------|
 | `index.html` | Single-page UI shell (all feature panels, modals, login) |
 | `logs.html` | Standalone log viewer page |
-| `styles.css` | All styling, including dark/light theme variables |
+| `styles.css` | All styling, including shared controls, dark theme variables, and responsive server-card/library layouts |
 | `logo.svg` | Project logo |
 | `todo.todo` | Scratch/notes file (not part of the app) |
 | `js/` | Frontend ES modules (see core + features tree pages) |

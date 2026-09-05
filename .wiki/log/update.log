@@ -50,3 +50,10 @@
 [2026-09-04T10:18:22Z] FIXED aggregate labels — TOTAL VRAM and TOTAL GPU USAGE now depend on more than one checked/tracked GPU, not physical GPU count.
 [2026-09-04T10:26:10Z] UPDATED Model Library table UI — added Hide/Show label, compact collapsed panel, explicit table header, right-aligned dates, and tighter row presentation.
 [2026-09-04T10:42:51Z] UPDATED server cards — removed VRAM estimation chip and start warning; moved enabled reasoning efforts to the title second line.
+[2026-09-05T21:39:00Z] UPDATED models/index.js + styles.css — compact server cards by moving slot indicators into the metadata column, aligning command/log/run controls, and making Stop outlined like Start.
+[2026-09-05T21:42:35Z] REFINED models/index.js + styles.css — moved Auto-start below the left URL metadata and placed slot indicators inline after the Chat button.
+[2026-09-05T21:46:05Z] REFINED styles.css — made Start/Stop neutral outlined controls with green/red hover emphasis and matched their 28px height and 5px corners to cmd/logs/edit.
+[2026-09-05T22:25:52Z] REFINED models/index.js + styles.css — tightened server-card spacing, added live slot busy/total counters, separated utility controls, and added a subtle green frame for online cards.
+[2026-09-05T22:46:58Z] REFINED index.html + library/index.js + styles.css — introduced explicit header/server/library action variants, made Add Server neutral, and replaced the library action grid with compact role-based controls.
+[2026-09-05T22:48:23Z] REFACTORED index.html + models/index.js + library/index.js + styles.css — consolidated visible header, server, and library buttons on the shared app-control primitive; semantic green/red feedback now appears only on hover.
+[2026-09-05T21:27:17Z] UPDATED styles.css + tree/static.md — added mobile-first server card and Model Library layouts with wrapping metadata, compact controls, and touch-visible library actions.
