@@ -124,30 +124,30 @@ function drawGraph(canvas, history, colors, axisLabel = "") {
 
 function drawVramGraph(history) {
   const colors = {
-    line: "#34d399",
-    fill: `rgba(52, 211, 153, ${GRAPH_FILL_OPACITY})`,
+    line: "#22c55e",
+    fill: `rgba(34, 197, 94, ${GRAPH_FILL_OPACITY})`,
   };
   drawGraph(vramGraphEl, history, colors);
 }
 
 function gpuVramColors() {
   return {
-    line: "#34d399",
-    fill: `rgba(52, 211, 153, ${GRAPH_FILL_OPACITY})`,
+    line: "#22c55e",
+    fill: `rgba(34, 197, 94, ${GRAPH_FILL_OPACITY})`,
   };
 }
 
 function gpuUsageColors() {
   return {
-    line: "#fb7185",
-    fill: `rgba(251, 113, 133, ${GRAPH_FILL_OPACITY})`,
+    line: "#ef4444",
+    fill: `rgba(239, 68, 68, ${GRAPH_FILL_OPACITY})`,
   };
 }
 
 function drawRamGraph(history) {
   const colors = {
-    line: "#fb923c",
-    fill: `rgba(251, 146, 60, ${GRAPH_FILL_OPACITY})`,
+    line: "#facc15",
+    fill: `rgba(250, 204, 21, ${GRAPH_FILL_OPACITY})`,
   };
   drawGraph(ramGraphEl, history, colors);
 }
@@ -325,8 +325,8 @@ export async function refreshCpuGraph() {
     const data = await api("/api/system/cpu/history");
     if (data.history && data.history.length > 0) {
       drawGraph(cpuGraphEl, data.history, {
-        line: "#60a5fa",
-        fill: `rgba(96, 165, 250, ${GRAPH_FILL_OPACITY})`,
+        line: "#3b82f6",
+        fill: `rgba(59, 130, 246, ${GRAPH_FILL_OPACITY})`,
       });
     }
   } catch {

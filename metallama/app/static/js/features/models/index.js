@@ -639,11 +639,13 @@ function slotIndicators(model) {
 
   let html = `<div class="slot-indicators" data-slot-model="${model.id}" title="Loading slot status…">`;
   const slots = cached?.slots || [];
+  const busyCount = slots.filter((slot) => slot.is_processing).length;
   for (let i = 0; i < dotCount; i++) {
     const s = slots[i];
     const cls = !s ? "unknown" : (s.is_processing ? "busy" : "free");
     html += `<span class="slot-dot ${cls}"></span>`;
   }
+  html += `<span class="slot-count">${busyCount}/${dotCount}</span>`;
   html += `</div>`;
   return html;
 }
@@ -686,18 +688,18 @@ function updateSlotIndicators() {
     const busy = slots.filter((s) => s.is_processing).length;
     let container = card.querySelector(".slot-indicators[data-slot-model]");
     if (!container) {
-      const centerCol = card.querySelector(".card-center-col");
-      if (!centerCol) return;
+      const endpointRow = card.querySelector(".endpoint-row");
+      if (!endpointRow) return;
       container = document.createElement("div");
       container.className = "slot-indicators";
       container.dataset.slotModel = modelId;
-      centerCol.appendChild(container);
+      endpointRow.appendChild(container);
     }
     container.title = `${busy}/${slots.length} slots busy`;
     // Rebuild dots to match the slot count
     container.innerHTML = slots
       .map((s) => `<span class="slot-dot ${s.is_processing ? "busy" : "free"}"></span>`)
-      .join("");
+      .join("") + `<span class="slot-count">${busy}/${slots.length}</span>`;
   });
 }
 
@@ -814,7 +816,16 @@ function cardTemplate(model) {
   const stem = modelStem(model);
 
   const isLLM = type === "LLM";
-  const reasoningEfforts = Array.isArray(model.reasoning_efforts) ? model.reasoning_efforts : [];
+  const configuredReasoningEfforts = Array.isArray(model.reasoning_efforts) ? model.reasoning_efforts : [];
+  const supportedReasoningEfforts = Array.isArray(model.supported_reasoning_efforts)
+    ? new Set(model.supported_reasoning_efforts)
+    : null;
+  const reasoningEfforts = supportedReasoningEfforts
+    ? configuredReasoningEfforts.filter((effort) => supportedReasoningEfforts.has(effort))
+    : configuredReasoningEfforts;
+  const reasoningEffortBadges = reasoningEfforts
+    .map((effort) => `<span class="reasoning-effort-badge ${escapeHtml(effort.toLowerCase())}">${escapeHtml(effort)}</span>`)
+    .join("");
   const slotsHtml = slotIndicators(model);
   const autoStartChip = isManaged
     ? `<label class="autostart-check admin-only" title="${model.auto_start ? "Auto-start on launch · click to disable" : "Auto-start on launch · currently off — click to enable"}"><input type="checkbox" data-id="${model.id}" data-action="autostart" ${model.auto_start ? "checked" : ""}><span>auto-start</span></label>`
@@ -831,7 +842,8 @@ function cardTemplate(model) {
       <div class="card-header-row">
         <div class="title-wrap">
           <h3>${model.display_name}</h3>
-          ${stem || reasoningEfforts.length ? `<span class="card-model-stem">${stem ? escapeHtml(stem) : ""}${reasoningEfforts.length ? ` ${escapeHtml(reasoningEfforts.join(", "))}` : ""}</span>` : ""}
+          ${stem ? `<span class="card-model-stem">${escapeHtml(stem)}</span>` : ""}
+          ${reasoningEffortBadges ? `<span class="reasoning-effort-badges">${reasoningEffortBadges}</span>` : ""}
         </div>
         <div class="header-badges">
           <span class="locality-badge ${isManaged ? "local" : "remote"}">${isManaged ? "Local" : "Remote"}</span>
@@ -844,28 +856,28 @@ function cardTemplate(model) {
           <div class="endpoint-row">
             <span class="endpoint-label">URL</span>
             <a class="endpoint-link" href="${model.url}" target="_blank">${model.url}</a>
-            ${model.status === "online" ? `<button class="btn-secondary btn-small btn-chat" data-id="${model.id}" data-action="open" data-url="${model.url}" title="Open llama.cpp's chat UI">chat ↗</button>` : ""}
+            ${model.status === "online" ? `<button class="btn-secondary btn-small btn-chat server-utility app-control" data-id="${model.id}" data-action="open" data-url="${model.url}" title="Open llama.cpp's chat UI">chat ↗</button>` : ""}
+            ${slotsHtml}
           </div>
 
+          ${autoStartChip}
           ${infoChips ? `<div class="info-chips">${infoChips}</div>` : ""}
         </div>
 
         <div class="card-center-col">
-          ${slotsHtml}
           <div class="card-controls">
-            ${isManaged ? `<button class="card-ctrl-btn admin-only" data-id="${model.id}" data-action="cmd" title="Copy launch command">cmd</button>` : ""}
-            ${isManaged ? `<button class="card-ctrl-btn admin-only ${openLogs.has(model.id) ? "active" : ""}" data-id="${model.id}" data-action="logs" title="Show server logs">logs</button>` : ""}
-            <button class="card-ctrl-btn admin-only" data-id="${model.id}" data-managed="${isManaged}" data-action="edit" title="Edit server config">edit</button>
+            ${isManaged ? `<button class="card-ctrl-btn server-utility app-control admin-only" data-id="${model.id}" data-action="cmd" title="Copy launch command">cmd</button>` : ""}
+            ${isManaged ? `<button class="card-ctrl-btn server-utility app-control admin-only ${openLogs.has(model.id) ? "active" : ""}" data-id="${model.id}" data-action="logs" title="Show server logs">logs</button>` : ""}
+            <button class="card-ctrl-btn server-utility app-control admin-only" data-id="${model.id}" data-managed="${isManaged}" data-action="edit" title="Edit server config">edit</button>
           </div>
         </div>
 
         <div class="card-actions-col">
           ${isManaged
-            ? `<button class="btn-action-${action} admin-only" data-id="${model.id}" data-action="${action}" ${canRunAction ? "" : "disabled"}>${label}</button>
-               <button class="btn-action-${action} disabled-readonly" disabled title="Admin access required">${label}</button>`
-            : `<button class="btn-action-start disabled-remote" disabled title="Remote servers cannot be managed from here">${model.status === "online" ? "Stop" : "Start"}</button>`
+            ? `<button class="btn-action-${action} app-control app-control-${action} admin-only" data-id="${model.id}" data-action="${action}" ${canRunAction ? "" : "disabled"}>${label}</button>
+              <button class="btn-action-${action} app-control app-control-${action} disabled-readonly" disabled title="Admin access required">${label}</button>`
+            : `<button class="btn-action-start app-control app-control-start disabled-remote" disabled title="Remote servers cannot be managed from here">${model.status === "online" ? "Stop" : "Start"}</button>`
           }
-          ${autoStartChip}
         </div>
       </div>
 

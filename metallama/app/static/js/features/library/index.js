@@ -12,21 +12,18 @@ function escapeHtml(s) {
 
 function modelItem(m) {
   const hasServer = (m.servers || []).length > 0;
-  const dotTitle = hasServer
-    ? `Served by: ${m.servers.join(", ")}`
-    : "No server configured for this model";
+  const displayName = (m.rel_path || "").split("/").pop() || `${m.name}.gguf`;
   return `
     <div class="library-item" title="${escapeHtml(m.rel_path)}">
-      <span class="library-dot ${hasServer ? "served" : ""}" title="${escapeHtml(dotTitle)}"></span>
       <div class="library-item-body">
-        <span class="library-item-name">${escapeHtml(m.name)}</span>
+        <span class="library-item-name">${escapeHtml(displayName)}</span>
       </div>
       <div class="library-item-actions">
         ${hasServer
           ? `<span class="library-action-spacer"></span>`
-          : `<button class="btn-secondary btn-small library-add admin-only" data-path="${escapeHtml(m.path)}" title="Create a server for this model">+ Serve</button>`}
-        <button class="btn-secondary btn-small library-rename admin-only" data-rel="${escapeHtml(m.rel_path)}" data-name="${escapeHtml(m.name)}" title="Rename this model file">Rename</button>
-        <button class="btn-danger btn-small library-delete admin-only" data-rel="${escapeHtml(m.rel_path)}" data-name="${escapeHtml(m.name)}" title="Permanently delete this model file">Delete</button>
+          : `<button class="btn-secondary btn-small library-action app-control app-control-positive library-add admin-only" data-path="${escapeHtml(m.path)}" title="Create a server for this model">Serve</button>`}
+        <button class="btn-secondary btn-small library-action app-control library-rename admin-only" data-rel="${escapeHtml(m.rel_path)}" data-name="${escapeHtml(displayName)}" title="Rename this model file">Rename</button>
+        <button class="btn-danger btn-small library-action app-control app-control-danger library-delete admin-only" data-rel="${escapeHtml(m.rel_path)}" data-name="${escapeHtml(displayName)}" title="Permanently delete this model file">Delete</button>
       </div>
       <span class="library-item-date" title="Downloaded">${escapeHtml(m.downloaded_at || "")}</span>
     </div>`;
@@ -45,10 +42,10 @@ function partialItem(p) {
       </div>
       <div class="library-partial-actions">
         ${canResume
-          ? `<button class="btn-primary btn-small library-resume admin-only" data-repo="${escapeHtml(p.repo_id)}" data-file="${escapeHtml(p.filename)}" data-name="${escapeHtml(p.name)}" title="Continue this download">Resume</button>`
+          ? `<button class="btn-primary btn-small library-action app-control app-control-positive library-resume admin-only" data-repo="${escapeHtml(p.repo_id)}" data-file="${escapeHtml(p.filename)}" data-name="${escapeHtml(p.name)}" title="Continue this download">Resume</button>`
           : ""}
-        <button class="btn-secondary btn-small library-rename admin-only" data-rel="${escapeHtml(p.rel_path)}" data-name="${escapeHtml(p.name)}" title="Rename this partial download">Rename</button>
-        <button class="btn-secondary btn-small library-discard admin-only" data-rel="${escapeHtml(p.rel_path)}" title="Delete the partial file${canResume ? "" : " (source unknown — re-download from search)"}">Discard</button>
+        <button class="btn-secondary btn-small library-action app-control library-rename admin-only" data-rel="${escapeHtml(p.rel_path)}" data-name="${escapeHtml(p.name)}" title="Rename this partial download">Rename</button>
+        <button class="btn-secondary btn-small library-action app-control app-control-danger library-discard admin-only" data-rel="${escapeHtml(p.rel_path)}" title="Delete the partial file${canResume ? "" : " (source unknown — re-download from search)"}">Discard</button>
       </div>
       <span class="library-item-date" title="Downloaded">${escapeHtml(p.downloaded_at || "")}</span>
     </div>`;
