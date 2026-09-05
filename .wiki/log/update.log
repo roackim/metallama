@@ -57,3 +57,4 @@
 [2026-09-05T22:46:58Z] REFINED index.html + library/index.js + styles.css — introduced explicit header/server/library action variants, made Add Server neutral, and replaced the library action grid with compact role-based controls.
 [2026-09-05T22:48:23Z] REFACTORED index.html + models/index.js + library/index.js + styles.css — consolidated visible header, server, and library buttons on the shared app-control primitive; semantic green/red feedback now appears only on hover.
 [2026-09-05T21:27:17Z] UPDATED styles.css + tree/static.md — added mobile-first server card and Model Library layouts with wrapping metadata, compact controls, and touch-visible library actions.
+[2026-09-05T23:51:06Z] UPDATED main.py — CPU and RAM probes now use the same 5-second backend cache as GPU/VRAM, while 1-second API polling continues to populate repeated history samples.

@@ -809,10 +809,6 @@ function cardTemplate(model) {
   const cardError = cardErrors.get(model.id) || "";
   const cardErrorClass = cardError ? "card-error visible" : "card-error";
   const accent = cardAccentColor(isManaged);
-  const isLoading = inFlight.has(model.id);
-  const overlayClass = isLoading ? "panel-overlay card-overlay" : "panel-overlay card-overlay is-hidden";
-  const flightAction = inFlight.get(model.id) || action;
-  const statusText = flightAction === "start" ? "Starting..." : "Stopping...";
   const stem = modelStem(model);
 
   const isLLM = type === "LLM";
@@ -893,12 +889,6 @@ function cardTemplate(model) {
         <pre class="log-output"></pre>
       </div>` : ""}
 
-      <div class="${overlayClass}">
-        <div class="overlay-content">
-          <div class="spinner"></div>
-          <p class="overlay-status">${statusText}</p>
-        </div>
-      </div>
     </article>
   `;
 }

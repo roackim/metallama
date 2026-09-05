@@ -76,6 +76,9 @@ app.include_router(hf_router)
 MAX_HISTORY_SAMPLES = 500
 ram_history: deque[dict[str, Any]] = deque(maxlen=MAX_HISTORY_SAMPLES)
 cpu_history: deque[dict[str, Any]] = deque(maxlen=MAX_HISTORY_SAMPLES)
+_SYSTEM_STATUS_CACHE_TTL = 5.0
+_ram_status_cache: tuple[float, dict[str, Any] | None] = (0.0, None)
+_cpu_status_cache: tuple[float, dict[str, Any] | None] = (0.0, None)
 
 # Per-GPU VRAM history, keyed by GPU id (e.g. "card0", "gpu0").
 # The aggregate total graph is derived from these on-demand (see
@@ -306,6 +309,12 @@ def get_vram_history() -> dict[str, Any]:
 @app.get("/api/system/ram")
 def get_ram_status() -> dict[str, Any]:
     """Get current RAM usage."""
+    global _ram_status_cache
+    cached_at, cached = _ram_status_cache
+    if cached is not None and time.time() - cached_at < _SYSTEM_STATUS_CACHE_TTL:
+        ram_history.append({"timestamp": int(time.time() * 1000), **{key: cached[key] for key in ("percent", "used_gb", "total_gb")}})
+        return cached
+
     try:
         import psutil
         mem = psutil.virtual_memory()
@@ -321,12 +330,14 @@ def get_ram_status() -> dict[str, Any]:
             "total_gb": total_gb,
         })
         
-        return {
+        result = {
             "available": True,
             "used_gb": used_gb,
             "total_gb": total_gb,
             "percent": percent,
         }
+        _ram_status_cache = (time.time(), result)
+        return result
     except ImportError:
         return {"error": "psutil not installed", "available": False}
     except Exception as exc:
@@ -342,11 +353,19 @@ def get_ram_history() -> dict[str, Any]:
 @app.get("/api/system/cpu")
 def get_cpu_status() -> dict[str, Any]:
     """Get current system CPU usage."""
+    global _cpu_status_cache
+    cached_at, cached = _cpu_status_cache
+    if cached is not None and time.time() - cached_at < _SYSTEM_STATUS_CACHE_TTL:
+        cpu_history.append({"timestamp": int(time.time() * 1000), "percent": cached["percent"]})
+        return cached
+
     try:
         import psutil
         percent = round(psutil.cpu_percent(interval=None), 1)
         cpu_history.append({"timestamp": int(time.time() * 1000), "percent": percent})
-        return {"available": True, "percent": percent}
+        result = {"available": True, "percent": percent}
+        _cpu_status_cache = (time.time(), result)
+        return result
     except ImportError:
         return {"error": "psutil not installed", "available": False}
     except Exception as exc:

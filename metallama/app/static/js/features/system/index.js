@@ -36,6 +36,23 @@ function drawGraph(canvas, history, colors, axisLabel = "") {
     return;
   }
 
+  canvas._graphHistory = history;
+  canvas._graphColors = colors;
+  canvas._graphAxisLabel = axisLabel;
+  if (!canvas._graphHoverBound) {
+    canvas._graphHoverBound = true;
+    canvas.addEventListener("pointermove", (event) => {
+      const rect = canvas.getBoundingClientRect();
+      const position = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+      canvas._graphHoverIndex = Math.round(position * (canvas._graphHistory.length - 1));
+      drawGraph(canvas, canvas._graphHistory, canvas._graphColors, canvas._graphAxisLabel);
+    });
+    canvas.addEventListener("pointerleave", () => {
+      canvas._graphHoverIndex = null;
+      drawGraph(canvas, canvas._graphHistory, canvas._graphColors, canvas._graphAxisLabel);
+    });
+  }
+
   const dpr = window.devicePixelRatio || 1;
   const rect = canvas.getBoundingClientRect();
   const cssW = Math.max(1, Math.floor(rect.width));
@@ -103,6 +120,37 @@ function drawGraph(canvas, history, colors, axisLabel = "") {
   ctx.beginPath();
   drawSmoothPath();
   ctx.stroke();
+
+  const hoverIndex = Number.isInteger(canvas._graphHoverIndex) ? canvas._graphHoverIndex : null;
+  if (hoverIndex !== null && points[hoverIndex]) {
+    const point = points[hoverIndex];
+    const sample = smoothedHistory[hoverIndex];
+    ctx.save();
+    ctx.strokeStyle = "rgba(244, 244, 245, 0.65)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(point.x, 0);
+    ctx.lineTo(point.x, height);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = colors.line;
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    const value = `${sample.percent.toFixed(1)}%`;
+    ctx.font = "700 14px ui-monospace, monospace";
+    const labelWidth = ctx.measureText(value).width + 14;
+    const labelX = Math.max(2, Math.min(width - labelWidth - 2, point.x - labelWidth / 2));
+    const labelY = Math.max(2, point.y - 22);
+    ctx.fillStyle = "rgba(10, 10, 9, 0.92)";
+    ctx.fillRect(labelX, labelY, labelWidth, 21);
+    ctx.fillStyle = "#f4f4f5";
+    ctx.textBaseline = "middle";
+    ctx.fillText(value, labelX + 7, labelY + 10.5);
+    ctx.restore();
+  }
 
   // Render the moving time axis outside the bordered canvas.
   const timePoints = [
