@@ -2607,6 +2607,22 @@ textarea:focus-visible {
   color: var(--text-dim);
 }
 
+.card.offline .server-utility,
+.card.offline .card-controls .app-control:not(.app-control-start) {
+  background: color-mix(in srgb, var(--panel-raised) 58%, var(--bg));
+  color: var(--text-dim);
+  opacity: 0.58;
+}
+
+.card.offline .server-utility:hover:not(:disabled),
+.card.offline .card-controls .app-control:not(.app-control-start):hover:not(:disabled),
+.card.offline .server-utility:focus-visible,
+.card.offline .card-controls .app-control:not(.app-control-start):focus-visible {
+  background: var(--bg-hover);
+  color: var(--text);
+  opacity: 0.9;
+}
+
 .card.online .endpoint-link {
   color: var(--green);
 }
