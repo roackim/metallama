@@ -48,6 +48,7 @@ export function setupHfSearch() {
   // Let the library panel resume interrupted downloads
   window.__metallamaResumeDownload = (repoId, filenames, label) =>
     startDownload(repoId, filenames, null, label);
+  window.__metallamaPauseDownload = (downloadId) => activeDownloads.get(downloadId)?.abort();
 
   // Closing the tab kills in-progress downloads (partials are kept and
   // resumable, but the user should know).
@@ -195,48 +196,13 @@ function bindDownloadClicks(container, repoId) {
 
 // ── Download ───────────────────────────────────────────────
 
-function getOrCreateDownloadBar(downloadId) {
-  const downloads = document.getElementById("hf-downloads");
-  downloads.classList.remove("is-hidden");
-
-  // Reuse existing bar for same download
-  let bar = downloads.querySelector(`[data-dl-id="${CSS.escape(downloadId)}"]`);
-  if (bar) return bar;
-
-  bar = document.createElement("div");
-  bar.className = "hf-dl-bar";
-  bar.dataset.dlId = downloadId;
-  bar.innerHTML = `
-    <span class="hf-dl-label"></span>
-    <div class="hf-dl-track">
-      <div class="hf-dl-fill" style="width: 0%"></div>
-    </div>
-    <span class="hf-dl-text">0%</span>
-    <button class="hf-dl-cancel" type="button" title="Cancel download (partial file is kept)">✕</button>
-  `;
-  downloads.appendChild(bar);
-  return bar;
-}
-
 async function startDownload(repoId, filenames, btn, label) {
   const downloadId = `${repoId}/${filenames[0].split("/").pop()}`;
-  const bar = getOrCreateDownloadBar(downloadId);
-  const dlLabel = bar.querySelector(".hf-dl-label");
-  const dlFill = bar.querySelector(".hf-dl-fill");
-  const dlText = bar.querySelector(".hf-dl-text");
-  const cancelBtn = bar.querySelector(".hf-dl-cancel");
-
-  dlLabel.textContent = label;
-  dlFill.style.width = "0%";
-  dlFill.className = "hf-dl-fill";
-  dlText.textContent = "0%";
+  await window.__metallamaRefreshLibrary?.();
 
   const controller = new AbortController();
   activeDownloads.set(downloadId, controller);
-  if (cancelBtn) {
-    cancelBtn.classList.remove("is-hidden");
-    cancelBtn.onclick = () => controller.abort();
-  }
+  window.__metallamaSetDownloadActive?.(downloadId, true);
 
   // Track per-file progress
   const fileProgress = {};
@@ -309,15 +275,15 @@ async function startDownload(repoId, filenames, btn, label) {
         }
 
         const pct = totalSize > 0 ? Math.round((totalCompleted / totalSize) * 100) : 0;
-        dlFill.style.width = `${pct}%`;
         const speedTxt = speedRate > 0 ? ` — ${formatBytes(speedRate)}/s` : "";
-        dlText.textContent = `${pct}% — ${formatBytes(totalCompleted)} / ${formatBytes(totalSize)}${speedTxt}`;
+        window.__metallamaUpdateDownloadProgress?.(
+          downloadId,
+          pct,
+          `${formatBytes(totalCompleted)} / ${formatBytes(totalSize)}${speedTxt}`
+        );
       }
     }
 
-    dlFill.style.width = "100%";
-    dlFill.classList.add("done");
-    dlText.textContent = "✓ Done";
     setConfigMessage(`Downloaded: ${filenames.length === 1 ? filenames[0].split("/").pop() : filenames.length + " files"}`);
 
     invalidateModelFilesCache();
@@ -336,31 +302,17 @@ async function startDownload(repoId, filenames, btn, label) {
       });
     }
 
-    // Fade out the download bar after 5s
-    setTimeout(() => {
-      bar.classList.add("fade-out");
-      setTimeout(() => {
-        bar.remove();
-        const downloads = document.getElementById("hf-downloads");
-        if (!downloads.children.length) {
-          downloads.classList.add("is-hidden");
-        }
-      }, 600);
-    }, 5000);
   } catch (err) {
-    dlFill.classList.add("error");
     if (err.name === "AbortError") {
-      dlText.textContent = "Cancelled — partial file kept";
       if (btn) { btn.textContent = "Resume"; btn.disabled = false; }
       setConfigMessage("Download cancelled — Resume continues from the partial file");
     } else {
-      dlText.textContent = `Error: ${err.message}`;
       if (btn) { btn.textContent = "Retry"; btn.disabled = false; }
       setConfigMessage(err.message, true);
     }
   } finally {
     activeDownloads.delete(downloadId);
-    if (cancelBtn) cancelBtn.classList.add("is-hidden");
+    window.__metallamaSetDownloadActive?.(downloadId, false);
     refreshLibrary().catch(() => {});
   }
 }

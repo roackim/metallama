@@ -34,13 +34,14 @@ function partialItem(p) {
   const width = p.percent != null ? Math.min(100, p.percent) : 0;
   const canResume = Boolean(p.repo_id && p.filename);
   return `
-    <div class="library-item partial" title="${escapeHtml(p.rel_path)}">
+    <div class="library-item partial" data-download-id="${escapeHtml(`${p.repo_id || ""}/${p.filename || p.name}`)}" title="${escapeHtml(p.rel_path)}">
       <div class="library-item-body">
         <span class="library-item-name">${escapeHtml(p.name)}</span>
         <div class="library-partial-track"><div class="library-partial-fill" style="width: ${width}%"></div></div>
         <span class="library-item-meta">${pct} downloaded${canResume ? "" : " · re-download the same file to resume"}</span>
       </div>
       <div class="library-partial-actions">
+        <button class="btn-secondary btn-small library-action app-control library-pause is-hidden" data-download-id="${escapeHtml(`${p.repo_id || ""}/${p.filename || p.name}`)}" title="Pause download">Pause</button>
         ${canResume
           ? `<button class="btn-primary btn-small library-action app-control app-control-positive library-resume admin-only" data-repo="${escapeHtml(p.repo_id)}" data-file="${escapeHtml(p.filename)}" data-name="${escapeHtml(p.name)}" title="Continue this download">Resume</button>`
           : ""}
@@ -97,8 +98,7 @@ function renderLibrary(models, partials) {
   emptyEl?.classList.toggle("is-hidden", models.length > 0 || partials.length > 0);
 
   if (partials.length) {
-    dlEl.innerHTML =
-      `<h3 class="side-subtitle">Interrupted downloads</h3>` + partials.map(partialItem).join("");
+    dlEl.innerHTML = `<h3 class="side-subtitle">Downloads</h3>` + partials.map(partialItem).join("");
     dlEl.classList.remove("is-hidden");
   } else {
     dlEl.innerHTML = "";
@@ -198,6 +198,19 @@ export function setupLibrary() {
 
   // models/index.js can't import us (we import it), so expose a hook
   window.__metallamaRefreshLibrary = () => refreshLibrary().catch(() => {});
+  window.__metallamaUpdateDownloadProgress = (downloadId, percent, text) => {
+    const item = panel.querySelector(`.library-item.partial[data-download-id="${CSS.escape(downloadId)}"]`);
+    if (!item) return;
+    const fill = item.querySelector(".library-partial-fill");
+    const meta = item.querySelector(".library-item-meta");
+    if (fill) fill.style.width = `${Math.min(100, percent)}%`;
+    if (meta) meta.textContent = `${Math.round(percent)}% downloaded${text ? ` — ${text}` : ""}`;
+  };
+  window.__metallamaSetDownloadActive = (downloadId, active) => {
+    const item = panel.querySelector(`.library-item.partial[data-download-id="${CSS.escape(downloadId)}"]`);
+    const pause = item?.querySelector(".library-pause");
+    if (pause) pause.classList.toggle("is-hidden", !active);
+  };
 
   panel.addEventListener("click", (event) => {
     const target = event.target;
@@ -212,6 +225,8 @@ export function setupLibrary() {
         target.dataset.name || target.dataset.file
       );
       setConfigMessage(`Resuming download: ${target.dataset.name}`);
+    } else if (target.classList.contains("library-pause")) {
+      window.__metallamaPauseDownload?.(target.dataset.downloadId);
     } else if (target.classList.contains("library-rename")) {
       const isPartial = target.closest(".library-item")?.classList.contains("partial") || false;
       renameItem(target.dataset.rel || "", target.dataset.name || "", isPartial);
