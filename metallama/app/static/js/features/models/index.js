@@ -72,6 +72,7 @@ function populateModelSelector(files, currentPath) {
   select.innerHTML = "";
 
   const warning = document.getElementById("edit-model-warning");
+  const label = "model";
   const normalizedCurrent = currentPath ? currentPath.replace(/^.*[\\/]/, "") : "";
   // Build full paths for option values
   const dir = modelsDirCache ? modelsDirCache.replace(/\/$/, "") + "/" : "";
@@ -373,6 +374,16 @@ function openCreateModal(type, prefill = null) {
 // Open the create modal pre-filled for a freshly downloaded model file.
 export function openCreateForModel(modelPath) {
   openCreateModal("managed", { model_path: modelPath });
+}
+
+// Returns true if `modal` is the front-most visible overlay. Overlays share a
+// z-index and stack by DOM order, so the last visible one in document order is
+// on top. Used to make Escape only affect the modal actually in focus — without
+// this, pressing Escape while two modals are stacked (e.g. edit + restart)
+// closes both at once because each has its own global keydown listener.
+function isTopmostModal(modal) {
+  const visible = [...document.querySelectorAll(".modal-overlay:not(.is-hidden)")];
+  return visible.length > 0 && visible[visible.length - 1] === modal;
 }
 
 function closeEditModal() {
@@ -942,8 +953,11 @@ export async function refreshModels() {
 }
 
 async function doRefreshModels() {
-  const activeElement = document.activeElement;
-  if (activeElement && (activeElement.classList?.contains("ctx-inline-input") || activeElement.classList?.contains("par-inline-input"))) {
+  // Don't swap the card DOM while a modal is open. The periodic refresh would
+  // otherwise re-render cards every tick and steal focus / jank the UI mid-edit
+  // (the "modal closes on its own" annoyance). The old guard checked for inline
+  // card inputs that no longer exist in the markup, so it never fired.
+  if (document.querySelector(".modal-overlay:not(.is-hidden)")) {
     return;
   }
 
@@ -1126,6 +1140,13 @@ export function setupModels() {
         return;
       }
 
+      if (action === "cmd") {
+        const data = await api(`/api/models/${encodeURIComponent(modelId)}/command`);
+        await copyToClipboard(data.command || "");
+        setConfigMessage("Launch command copied to clipboard");
+        return;
+      }
+
       await startStop(modelId, action);
     } catch (err) {
       setCardError(modelId, err.message);
@@ -1157,9 +1178,10 @@ export function setupModels() {
       }
     });
 
-    // Close on Escape key
+    // Close on Escape key (only when this is the front-most open modal)
     document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && !modal.classList.contains("is-hidden")) {
+      if (event.key === "Escape" && !modal.classList.contains("is-hidden") && isTopmostModal(modal)) {
+        event.stopPropagation();
         closeEditModal();
       }
     });
@@ -1187,9 +1209,10 @@ export function setupModels() {
       if (event.target === restartModal) closeRestartModal();
     });
 
-    // Close on Escape key
+    // Close on Escape key (only when this is the front-most open modal)
     document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && !restartModal.classList.contains("is-hidden")) {
+      if (event.key === "Escape" && !restartModal.classList.contains("is-hidden") && isTopmostModal(restartModal)) {
+        event.stopPropagation();
         closeRestartModal();
       }
     });
