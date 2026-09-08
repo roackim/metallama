@@ -359,12 +359,17 @@ async def _stream_chat(model: str, resp: httpx.Response) -> AsyncIterator[str]:
 
     Content deltas stream through; tool-call fragments are accumulated and
     emitted as one complete message (Ollama semantics), then a final done
-    line carries the finish reason.
+    line carries the finish reason and token usage (when available).
     """
     pending_calls: dict[int, dict[str, Any]] = {}
     finish: str | None = None
+    usage: dict[str, Any] = {}
 
     async for data in _sse_events(resp):
+        # llama-server emits a final chunk with empty choices + usage when
+        # stream_options.include_usage is set.
+        if data.get("usage"):
+            usage = data["usage"]
         choice = data.get("choices", [{}])[0] if data.get("choices") else {}
         finish = choice.get("finish_reason") or finish
         delta = choice.get("delta", {})
@@ -411,13 +416,17 @@ async def _stream_chat(model: str, resp: httpx.Response) -> AsyncIterator[str]:
             "done": False,
         }) + "\n"
 
-    yield json.dumps({
+    done: dict[str, Any] = {
         "model": model,
         "created_at": _now(),
         "message": {"role": "assistant", "content": ""},
         "done": True,
         "done_reason": _done_reason(finish),
-    }) + "\n"
+    }
+    if usage:
+        done["prompt_eval_count"] = usage.get("prompt_tokens", 0)
+        done["eval_count"] = usage.get("completion_tokens", 0)
+    yield json.dumps(done) + "\n"
 
 
 @router.post("/api/chat", response_model=None)
@@ -438,6 +447,12 @@ async def chat(req: OllamaChatRequest) -> StreamingResponse | JSONResponse:
         payload["tools"] = req.tools
     if req.format == "json":
         payload["response_format"] = {"type": "json_object"}
+    # Ask upstream for real token usage on the final streaming chunk (OpenAI
+    # stream_options). llama-server honours this; servers that don't simply
+    # omit it and we fall back to no counts. Client-supplied values win.
+    if req.stream:
+        client_opts = body.get("stream_options") or {}
+        payload["stream_options"] = {"include_usage": True, **client_opts}
     _apply_reasoning_effort(payload, body, req.model)
 
     if req.stream:

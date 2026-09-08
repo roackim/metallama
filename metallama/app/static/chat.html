@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chat — Metallama</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg"/>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body class="chat-page">
+    <header class="chat-head">
+      <div class="chat-head-left">
+        <a class="logs-back" href="/" title="Back to Metallama">← Metallama</a>
+        <h1 class="chat-title">Chat</h1>
+        <span id="chat-status" class="status-badge offline">no model</span>
+      </div>
+      <div class="chat-head-right">
+        <select id="chat-history-select" class="chat-select" title="Saved conversations"></select>
+        <button id="chat-delete-btn" class="btn-secondary btn-small" type="button" title="Delete this conversation">✕ Delete</button>
+        <button id="chat-export-btn" class="btn-secondary btn-small" type="button" title="Download this conversation as JSON">↓ Export</button>
+        <button id="chat-import-btn" class="btn-secondary btn-small" type="button" title="Import a conversation from a JSON file">↑ Import</button>
+        <button id="chat-new-btn" class="btn-secondary btn-small" type="button" title="Start a new conversation">+ New</button>
+        <select id="chat-model-select" class="chat-select" title="Model (running servers only)"></select>
+      </div>
+    </header>
+
+    <main id="chat-messages" class="chat-messages" aria-live="polite">
+      <p id="chat-empty" class="chat-empty is-hidden">No messages yet — pick a model and say hello.</p>
+    </main>
+
+    <footer class="chat-input-bar">
+      <div class="chat-input-wrap">
+        <textarea
+          id="chat-input"
+          class="chat-textarea"
+          rows="1"
+          placeholder="Send a message… (Enter to send, Shift+Enter for newline)"
+          autocomplete="off"
+        ></textarea>
+        <div class="chat-input-actions">
+          <span id="chat-tokens" class="summary-chip chat-token-chip is-hidden"></span>
+          <button id="chat-stop-btn" class="btn-danger btn-small is-hidden" type="button">■ Stop</button>
+          <button id="chat-send-btn" class="btn-primary btn-small" type="button" disabled>Send</button>
+        </div>
+      </div>
+    </footer>
+
+    <input type="file" id="chat-import-file" accept=".json,application/json" hidden />
+
+    <p id="ui-message" class="ui-message"></p>
+
+    <script type="module">
+      import { initChat } from "/static/js/features/chat/index.js";
+      document.documentElement.dataset.theme = "dark";
+      initChat();
+    </script>
+  </body>
+</html>

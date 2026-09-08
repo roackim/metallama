@@ -151,6 +151,11 @@ def index() -> FileResponse:
     return FileResponse(str(STATIC_DIR / "index.html"))
 
 
+@app.get("/chat", include_in_schema=False)
+def chat_page() -> FileResponse:
+    return FileResponse(str(STATIC_DIR / "chat.html"))
+
+
 @app.get("/api/health")
 def health_check() -> dict[str, Any]:
     """Return health status including binary availability."""
