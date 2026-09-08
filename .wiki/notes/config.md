@@ -1,101 +1,55 @@
 # Configuration
 
-Metallama is configured via environment variables (`.env`) and a unified `config.yaml`
-at the repo root.
-
 ## Environment Variables
 
-| Variable | Purpose | Default |
-|----------|---------|---------|
-| `METALLAMA_LLAMACPP_BINARY` | Path to `llama-server` binary (or name on `$PATH`) | _(empty — local servers won't start)_ |
-| `METALLAMA_MODELS_DIR` | Directory for `.gguf` files (model picker & HF downloads) | _(empty — model picker disabled)_ |
-| `METALLAMA_BASE_URL` | Display URL for model endpoint links | `http://localhost` |
-| `METALLAMA_ADMIN_PASS_HASH` | Scrypt hash for admin login | _(empty — auth disabled)_ |
-| `METALLAMA_CONFIG_FILE` | Path to the servers config | `config.yaml` (repo root) |
-| `METALLAMA_DL_CONNECTIONS` | Parallel connections for HF downloads | `6` |
-| `METALLAMA_BIND_HOST` | Address llama-servers bind to (`127.0.0.1` restricts to localhost) | `0.0.0.0` |
+Loaded from `.env` file at project root via `python-dotenv`.
 
-These are read in `config.py` (`Config` class) and `auth.py`. `METALLAMA_CONFIG_FILE`
-is read in `unified_config.py`.
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `METALLAMA_LLAMACPP_BINARY` | `""` | Path (or name in `$PATH`) to the `llama-server` binary |
+| `METALLAMA_MODELS_DIR` | `""` | Directory scanned for `.gguf` files (model picker & HF downloads) |
+| `METALLAMA_BASE_URL` | `"http://gpu4.hygeos.com"` | Base URL shown in model endpoint links |
+| `METALLAMA_ADMIN_PASS_HASH` | `""` | Scrypt password hash for admin login; empty = auth disabled |
 
-## config.yaml
+## config.yaml (Unified Config)
 
-The unified config file has three sections:
+Single source of truth at project root. Three sections:
 
-### `engine_defaults`
-Default CLI args prepended to every server launch for a given engine. Last flag wins
-when merged with per-server args. Example:
 ```yaml
 engine_defaults:
   llama:
-    - --gpu-layers all
-    - --threads 4
-    - --flash-attn on
+    flash_attn: "on"
+    threads: 6
+    n_gpu_layers: 999
+    cache_ram: 16384
+    kv_unified: true
+    # ...
+
+managed_servers:    # Local llama.cpp instances (can also be added via API)
+  - name: "my-model"
+    model_path: "/path/to/model.gguf"
+    port: 8081
+    context_window: 64000
+    parallel: 4
+    extra_args:
+      - --temp 0.85
+
+remote_servers:     # Distant endpoints (hand-edited or added via API)
+  - name: "remote-model"
+    url: "http://other-host:8080"
+    context_length: 32000
 ```
 
-### `managed_servers`
-Owned local models, machine-generated/managed by the app. Each entry:
-- `name` — server/model name
-- `model_path` — path to the `.gguf` file
-- `model_draft` — optional draft model path (speculative decoding)
-- `port` — bind port
-- `engine` — engine name (default `llama`)
-- `context_window` — per-slot context length
-- `parallel` — number of parallel slots
-- `extra_args` — extra CLI args
-- `auto_start` — whether to start on app startup
-- `mmproj` — optional multimodal projector path
-- `reasoning_efforts` — enabled reasoning levels exposed as virtual gateway models; effective values are limited to those inferred from the model template
+Loaded by `unified_config.py` into `UnifiedConfig` Pydantic model. Cached in memory; cache is cleared on any API write.
 
-### `remote_servers`
-Distant servers, hand-edited by humans. Each entry:
-- `name` — server name
-- `url` — base URL
-- `family` / `size` — metadata (defaults `unknown`)
-- `context_length` — context length (default `4096`)
+**Engine defaults** are prepended before profile `extra_args` (last flag wins in llama-server).
 
-## Legacy config
+## Legacy Config
 
-`metallama/app/ollama/config.yaml` holds a legacy `subservers` list. It is still read
-as a fallback source for the gateway registry, but unified config wins on name conflicts.
-
-## GPU tracking config (`.metallama_gpu_config.json`)
-
-A small JSON file at the repo root (next to `config.yaml`) records which GPUs the user
-has opted out of tracking in the VRAM panel. It holds an `excluded_gpus` list; the
-default (empty list) means all GPUs are tracked. Written atomically by
-`POST /api/system/vram/gpus/toggle` and read on every VRAM request, so edits persist
-across restarts.
-
-```json
-{ "excluded_gpus": ["card2"] }
-```
-
-### Virtual reasoning-effort models
-
-Managed servers may enable effort variants in `config.yaml`:
-
-```yaml
-reasoning_efforts:
-  - low
-  - medium
-  - high
-```
-
-An empty list disables virtual effort models. The gateway probes the upstream
-`/props` `chat_template` and infers accepted reasoning values. Only enabled values
-that the template supports are exposed as `name:effort` variants. Selecting a
-variant strips the suffix before upstream forwarding and injects the effort into
-the llama-server request.
-
-## Loading & Caching
-
-- `unified_config.load_unified_config()` loads and caches the config (keyed by resolved path).
-- `clear_config_cache()` invalidates the cache after edits.
-- `profiles.reload_model_profiles()` rebuilds `MODEL_PROFILES` from disk.
-- `config.py` keeps thin compatibility wrappers (`load_server_configs`, `save_server_configs`, etc.) that delegate to `unified_config`.
+- `server_configs.json` — formerly used for per-server overrides; now superseded by `config.yaml`
+- `metallama/app/ollama/config.yaml` — formerly used for ollama gateway subservers; now loaded from unified `config.yaml`
 
 ## See Also
-- [Architecture](architecture.md)
-- [app tree](../tree/app.md)
-- [root tree](../tree/root.md)
+- [Unified config module](../tree/app.md)
+- [Ollama module](../tree/app-ollama.md)
+- [Root files](../tree/root.md)
