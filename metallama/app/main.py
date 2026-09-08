@@ -60,8 +60,25 @@ async def lifespan(app: FastAPI):
         await aclose_client()
 
 
+class NoCacheStaticFiles(StaticFiles):
+    """Static files that always revalidate.
+
+    JS/CSS are served at fixed (non-content-hashed) paths, so a browser's
+    heuristic cache can keep serving stale code after an edit — the classic
+    "I changed it but nothing happened" during development. Sending
+    ``Cache-Control: no-cache`` forces a conditional revalidation on every load;
+    unchanged files still return fast 304s via ETag, so this costs little while
+    guaranteeing fresh code.
+    """
+
+    def file_response(self, full_path, stat_result, scope, status_code=200):
+        response = super().file_response(full_path, stat_result, scope, status_code)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 app = FastAPI(title="metallama", lifespan=lifespan)
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+app.mount("/static", NoCacheStaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # ---------------------------------------------------------------------------
 # Ollama / OpenAI gateway (mounted at /ollama)
