@@ -12,8 +12,8 @@ html {
 
 :root {
   --bg:         #0a0a09;
-  --panel:      #1a1714;
-  --panel-raised:#211d1a;
+  --panel:      #201e1c;
+  --panel-raised:#272422;
   --line:       #403a35;
   --line-bright:#62574f;
   --text:       #f4f4f5;
@@ -29,7 +29,7 @@ html {
   --signal-green-dim: rgba(34, 197, 94, 0.12);
   --signal-amber-dim: rgba(234, 179, 8, 0.12);
   --red:        #ef4444;
-  --bg-hover:   #29221e;
+  --bg-hover:   #302c2a;
   --bg-active:  rgba(109, 93, 252, 0.16);
   --btn-bg:     #f4f4f5;
   --btn-text:   #09090b;
@@ -2807,6 +2807,10 @@ textarea:focus-visible {
 }
 
 .chat-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
   font-size: 0.7rem;
   font-weight: 650;
   text-transform: uppercase;
@@ -2901,5 +2905,184 @@ textarea:focus-visible {
     max-width: none;
     flex: 1;
   }
+}
+
+/* ── Markdown content (rendered assistant messages) ─────── */
+.chat-body.is-md {
+  white-space: normal;
+}
+
+.chat-body.is-md > :first-child { margin-top: 0; }
+.chat-body.is-md > :last-child { margin-bottom: 0; }
+
+.chat-body.is-md p { margin: 0.5rem 0; }
+.chat-body.is-md h1, .chat-body.is-md h2, .chat-body.is-md h3,
+.chat-body.is-md h4, .chat-body.is-md h5, .chat-body.is-md h6 {
+  margin: 0.9rem 0 0.4rem;
+  line-height: 1.3;
+}
+.chat-body.is-md h1 { font-size: 1.25rem; }
+.chat-body.is-md h2 { font-size: 1.12rem; }
+.chat-body.is-md h3 { font-size: 1.02rem; }
+
+.chat-body.is-md ul, .chat-body.is-md ol { margin: 0.5rem 0; padding-left: 1.4rem; }
+.chat-body.is-md li { margin: 0.2rem 0; }
+
+.chat-body.is-md a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.chat-body.is-md a:hover { color: var(--accent-2, #d946ef); }
+
+.chat-body.is-md blockquote {
+  margin: 0.5rem 0;
+  padding: 0.1rem 0.8rem;
+  border-left: 3px solid var(--line-bright, var(--line));
+  color: var(--text-dim);
+}
+
+.chat-body.is-md hr { border: none; border-top: var(--border-size) solid var(--line); margin: 0.9rem 0; }
+
+/* Inline code */
+.chat-body.is-md :not(pre) > code {
+  background: var(--panel-raised);
+  border: var(--border-size) solid var(--line);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.86em;
+}
+
+/* Tables */
+.chat-body.is-md table {
+  border-collapse: collapse;
+  margin: 0.6rem 0;
+  width: 100%;
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+}
+.chat-body.is-md th, .chat-body.is-md td {
+  border: var(--border-size) solid var(--line);
+  padding: 0.35rem 0.6rem;
+  text-align: left;
+}
+.chat-body.is-md th { background: var(--panel-raised); font-weight: 650; }
+
+/* ── Code blocks (fenced) with header + copy button ─────── */
+.chat-codeblock {
+  margin: 0.7rem 0;
+  border: var(--border-size) solid var(--line);
+  border-radius: var(--radius-sm, 8px);
+  overflow: hidden;
+  /* Neutral fallback only — the active theme's own .hljs background
+     covers this edge-to-edge once code is highlighted. */
+  background: var(--panel);
+}
+
+.chat-code-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.18rem 0.6rem; /* thinner header */
+  background: var(--panel-raised);
+  border-bottom: var(--border-size) solid var(--line);
+}
+
+.chat-code-lang {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.68rem;
+  text-transform: lowercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+
+.chat-copy-btn {
+  background: transparent;
+  border: var(--border-size) solid var(--line);
+  color: var(--text-dim);
+  font-family: inherit;
+  min-height: 0; /* compact, like the edit button */
+  padding: 0.1rem 0.45rem;
+  font-size: 0.68rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+.chat-copy-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--bg-active);
+}
+.chat-copy-btn.is-copied {
+  color: var(--green, #4ade80);
+  border-color: color-mix(in srgb, var(--green, #4ade80) 50%, var(--line));
+}
+
+.chat-codeblock pre {
+  margin: 0;
+  padding: 0; /* moved to code.hljs so the theme bg fills edge-to-edge */
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.chat-codeblock pre code.hljs {
+  /* No background override here — let the active theme's .hljs bg show. */
+  padding: 0.7rem 0.8rem;
+  display: block;
+}
+
+/* ── Message actions (edit) + inline editor ─────────────── */
+.chat-msg-actions {
+  margin-left: auto; /* push to the right end of the meta row */
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.chat-msg:hover .chat-msg-actions,
+.chat-msg:focus-within .chat-msg-actions {
+  opacity: 1;
+}
+.chat-msg-actions.is-hidden { display: none; }
+
+/* Compact edit button that sits in the meta row without adding height */
+.chat-edit-btn {
+  min-height: 0;
+  padding: 0.1rem 0.45rem;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+}
+
+.chat-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.chat-edit-input {
+  width: 100%;
+  resize: none;
+  overflow-y: auto;
+  scrollbar-width: none;
+  background: var(--panel-raised);
+  border: var(--border-size) solid var(--accent);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.8rem;
+  font-family: inherit;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+.chat-edit-input::-webkit-scrollbar { display: none; }
+.chat-edit-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--brand-glow, rgba(172, 122, 91, 0.2));
+}
+
+.chat-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 

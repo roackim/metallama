@@ -6,6 +6,7 @@
     <title>Chat — Metallama</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg"/>
     <link rel="stylesheet" href="/static/styles.css" />
+    <!-- highlight.js theme is applied at runtime from the saved setting (see features/chat/index.js) -->
   </head>
   <body class="chat-page">
     <header class="chat-head">
@@ -20,6 +21,7 @@
         <button id="chat-export-btn" class="btn-secondary btn-small" type="button" title="Download this conversation as JSON">↓ Export</button>
         <button id="chat-import-btn" class="btn-secondary btn-small" type="button" title="Import a conversation from a JSON file">↑ Import</button>
         <button id="chat-new-btn" class="btn-secondary btn-small" type="button" title="Start a new conversation">+ New</button>
+        <select id="chat-theme-select" class="chat-select" title="Code highlight theme"></select>
         <select id="chat-model-select" class="chat-select" title="Model (running servers only)"></select>
       </div>
     </header>
