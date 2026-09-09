@@ -66,6 +66,17 @@ It also handles auth state (login modal, admin toggle) and the binary-missing wa
   values can then be disabled. Server cards display the enabled set as a
   `Reasoning: ...` chip. Enabled values become virtual `name:effort` models in the
   Ollama gateway.
+- **Reasoning ("thoughts") display**: the chat page renders a model's
+  `reasoning_content` in a dedicated collapsible "Thoughts" chat message
+  (`.chat-msg.thoughts`, a single `<details>` whose summary reads "Thought for Xs")
+  above the answer. The summary uses a `＋`/`−` collapse icon and gold text; the
+  body renders as Markdown (including code blocks). It streams live during
+  generation and is persisted on the assistant message (`msg.reasoning` plus
+  `msg.reasoning_secs` for the duration), included in exports, and restored on
+  import.
+- **Message meta colors**: user messages show a blue "You" label; assistant
+  messages show the model name in the accent color; thoughts messages show a gold
+  "Thought for Xs" label.
 
 ## See Also
 - [Architecture](architecture.md)
