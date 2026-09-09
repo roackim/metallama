@@ -10,6 +10,7 @@ import { copyToClipboard } from "/static/js/core/clipboard.js";
 const LS_CONVS = "metallama.chat.conversations";
 const LS_MODEL = "metallama.chat.model";
 const LS_HLTHEME = "metallama.chat.hltheme";
+const LS_SIDEBAR = "metallama.chat.sidebar"; // "1" when collapsed
 
 // Syntax-highlight themes (highlight.js 11.11.1 ships all of these).
 const HL_THEMES = [
@@ -41,6 +42,16 @@ function currentHlTheme() {
   return HL_THEMES.includes(saved) ? saved : HL_DEFAULT_THEME;
 }
 
+/** Collapse/expand the conversation sidebar; the choice persists across loads. */
+function setSidebarCollapsed(collapsed) {
+  $shell.classList.toggle("is-collapsed", collapsed);
+  // Both the expand arrow (main area) and collapse arrow (sidebar) reflect state.
+  if ($expandBtn) $expandBtn.setAttribute("aria-expanded", String(!collapsed));
+  if ($collapseBtn) $collapseBtn.setAttribute("aria-expanded", String(!collapsed));
+  if (collapsed) localStorage.setItem(LS_SIDEBAR, "1");
+  else localStorage.removeItem(LS_SIDEBAR);
+}
+
 // How often (ms) to re-render live Markdown while streaming. Fence open/close
 // events bypass this and render immediately so code blocks appear right away.
 const LIVE_RENDER_MS = 120;
@@ -52,6 +63,10 @@ let streaming = false;
 let aborter = null;
 
 // ── DOM refs ───────────────────────────────────────────────
+const $shell = document.querySelector(".chat-shell");
+const $expandBtn = document.getElementById("chat-expand-btn");
+const $newTopbarBtn = document.getElementById("chat-new-topbar-btn");
+const $collapseBtn = document.getElementById("chat-collapse-btn");
 const $messages = document.getElementById("chat-messages");
 const $empty = document.getElementById("chat-empty");
 const $input = document.getElementById("chat-input");
@@ -59,13 +74,13 @@ const $send = document.getElementById("chat-send-btn");
 const $stop = document.getElementById("chat-stop-btn");
 const $modelSelect = document.getElementById("chat-model-select");
 const $themeSelect = document.getElementById("chat-theme-select");
-const $historySelect = document.getElementById("chat-history-select");
-const $deleteBtn = document.getElementById("chat-delete-btn");
-const $exportBtn = document.getElementById("chat-export-btn");
+const $convList = document.getElementById("chat-conv-list");
+const $convTitle = document.getElementById("chat-conv-title");
+const $renameBtn = document.getElementById("chat-rename-btn");
 const $importBtn = document.getElementById("chat-import-btn");
 const $importFile = document.getElementById("chat-import-file");
 const $newBtn = document.getElementById("chat-new-btn");
-const $status = document.getElementById("chat-status");
+const $convDate = document.getElementById("chat-conv-date");
 const $tokens = document.getElementById("chat-tokens");
 
 // ── Persistence ────────────────────────────────────────────
@@ -85,13 +100,43 @@ function currentConv() {
   return conversations.find((c) => c.id === currentId) || null;
 }
 
+const MONTHS_SHORT = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sept","Oct","Nov","Dec"];
+
+/** Default conversation name: e.g. "New chat, 9 Sept 2026". */
+function defaultTitle(ts) {
+  const d = new Date(ts);
+  return `New chat, ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()}`;
+}
+
 function newConversation() {
-  const conv = { id: crypto.randomUUID(), title: "New chat", messages: [], created_at: Date.now() };
+  const ts = Date.now();
+  const conv = { id: crypto.randomUUID(), title: defaultTitle(ts), messages: [], created_at: ts };
   conversations.unshift(conv);
   currentId = conv.id;
   saveConvs();
-  renderHistorySelect();
+  renderConvList();
+  renderConvTitle();
   renderMessages();
+}
+
+/** Show the active conversation's name + start date in the header. */
+function renderConvTitle() {
+  const conv = currentConv();
+  $convTitle.textContent = conv ? (conv.title || "Untitled") : "";
+  $renameBtn.disabled = !conv;
+  if (conv) {
+    const d = new Date(conv.created_at);
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    $convDate.textContent = `${dd}/${mm}/${d.getFullYear()}`;
+    // Tooltip: full date + hour
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mi = String(d.getMinutes()).padStart(2, "0");
+    $convDate.title = `${dd}/${mm}/${d.getFullYear()} ${hh}:${mi}`;
+  } else {
+    $convDate.textContent = "";
+    $convDate.title = "";
+  }
 }
 
 function deleteConversation(id) {
@@ -99,8 +144,58 @@ function deleteConversation(id) {
   if (currentId === id) currentId = conversations[0]?.id || null;
   if (!currentId && conversations.length === 0) newConversation();
   saveConvs();
-  renderHistorySelect();
+  renderConvList();
+  renderConvTitle();
   renderMessages();
+}
+
+/** Inline-rename a conversation: swap `hostEl`'s text for an input. Shared by the
+ *  header button and each sidebar item's ✎. Enter/blur saves, Esc cancels. */
+function startInlineRename(convId, hostEl) {
+  const conv = conversations.find((c) => c.id === convId);
+  if (!conv || streaming) return;
+
+  const item = hostEl.closest(".chat-conv-item");
+  if (item) {
+    item.classList.add("is-renaming");
+    // Hide the label; the editor is appended to the row so it can span full width.
+    hostEl.style.display = "none";
+  }
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "chat-rename-input";
+  input.value = conv.title || "";
+  (item || hostEl).appendChild(input);
+  input.focus();
+  input.select();
+
+  let done = false;
+  const finish = (commit) => {
+    if (done) return;
+    done = true;
+    if (item) item.classList.remove("is-renaming");
+    if (commit) {
+      const v = input.value.trim();
+      if (v && v !== conv.title) {
+        conv.title = v;
+        saveConvs();
+      } else if (!v) {
+        toast("Name can't be empty.", true);
+      }
+    }
+    renderConvList();
+    renderConvTitle();
+  };
+
+  // Don't let interaction with the editor bubble up to "select conversation".
+  input.addEventListener("mousedown", (e) => e.stopPropagation());
+  input.addEventListener("click", (e) => e.stopPropagation());
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); finish(true); }
+    else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+  });
+  input.addEventListener("blur", () => finish(true));
 }
 
 // ── Import / Export ────────────────────────────────────────
@@ -115,8 +210,8 @@ function sanitizeFilename(input) {
     .slice(0, 80);
 }
 
-function exportConversation() {
-  const conv = currentConv();
+function exportConversation(conv) {
+  conv = conv || currentConv();
   if (!conv || conv.messages.length === 0) {
     toast("Nothing to export — this conversation is empty.", true);
     return;
@@ -191,7 +286,7 @@ async function importConversation(file) {
   conversations.unshift(conv);
   currentId = conv.id;
   saveConvs();
-  renderHistorySelect();
+  renderConvList();
   renderMessages();
   updateTokenChip();
   toast(`Imported "${title}" (${messages.length} messages).`);
@@ -227,14 +322,13 @@ function renderModelSelect() {
     opt.value = "";
     opt.textContent = "No running models";
     $modelSelect.appendChild(opt);
-    setStatus("offline", "no model");
     return;
   }
   for (const m of models) {
     const opt = document.createElement("option");
     opt.value = m.name;
-    const ctx = m.details?.context_length ? ` · ${fmtCtx(m.details.context_length)}` : "";
-    opt.textContent = `${m.name}${ctx}`;
+    // Context window lives in the ctx chip, not glued onto the model name.
+    opt.textContent = m.name;
     $modelSelect.appendChild(opt);
   }
   if (models.some((m) => m.name === prev)) {
@@ -242,35 +336,144 @@ function renderModelSelect() {
   } else {
     localStorage.removeItem(LS_MODEL);
   }
-  setStatus("online", models.length === 1 ? models[0].name : `${models.length} models`);
+  sizeModelSelect();
+}
+
+/** Size the model selector to fit its longest option name. */
+function sizeModelSelect() {
+  const cs = getComputedStyle($modelSelect);
+  // Hidden measurer matching the select's text styles (uppercase, weight, spacing).
+  const m = document.createElement("span");
+  m.style.cssText = `position:absolute;visibility:hidden;white-space:nowrap;font-family:${cs.fontFamily};font-size:${cs.fontSize};font-weight:${cs.fontWeight};text-transform:${cs.textTransform};letter-spacing:${cs.letterSpacing}`;
+  document.body.appendChild(m);
+  let widest = 0;
+  for (const opt of $modelSelect.options) {
+    m.textContent = opt.value || "No running models";
+    widest = Math.max(widest, m.getBoundingClientRect().width);
+  }
+  m.remove();
+  // Text + left padding + right room for the chevron.
+  const padL = parseFloat(cs.paddingLeft) || 0;
+  const padR = parseFloat(cs.paddingRight) || 0;
+  $modelSelect.style.minWidth = `${Math.ceil(widest + padL + padR)}px`;
+  $modelSelect.style.maxWidth = "none";
 }
 
 function fmtCtx(n) {
   return n >= 1024 ? `${Math.round(n / 1024)}k ctx` : `${n} ctx`;
 }
 
-function setStatus(state, label) {
-  $status.className = `status-badge ${state}`;
-  $status.textContent = label;
-}
-
-// ── History dropdown ───────────────────────────────────────
-function renderHistorySelect() {
+// ── Conversation sidebar list ──────────────────────────────
+function renderConvList() {
   const prev = currentId;
-  $historySelect.innerHTML = "";
-  for (const c of conversations) {
-    const opt = document.createElement("option");
-    opt.value = c.id;
-    const date = new Date(c.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-    opt.textContent = `${c.title} (${date})`;
-    $historySelect.appendChild(opt);
-  }
-  if (conversations.some((c) => c.id === prev)) {
-    currentId = prev;
-  } else {
+  if (!conversations.some((c) => c.id === prev)) {
     currentId = conversations[0]?.id || null;
   }
-  $historySelect.value = currentId || "";
+  $convList.innerHTML = "";
+  for (const c of conversations) {
+    const li = document.createElement("li");
+    li.className = "chat-conv-item" + (c.id === currentId ? " is-active" : "");
+    li.dataset.id = c.id;
+
+    const title = document.createElement("span");
+    title.className = "chat-conv-title";
+    title.textContent = c.title || "New chat";
+    title.title = `${c.title} · ${new Date(c.created_at).toLocaleString()}`;
+
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "chat-conv-more";
+    more.textContent = "⋯";
+    more.title = `Actions for "${c.title}"`;
+    more.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openConvMenu(more, c, title);
+    });
+
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "chat-conv-del";
+    del.textContent = "✕";
+    del.title = `Delete "${c.title}"`;
+    del.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (streaming) return;
+      if (confirm(`Delete "${c.title}"?`)) deleteConversation(c.id);
+    });
+
+    const actions = document.createElement("span");
+    actions.className = "chat-conv-actions";
+    actions.append(more, del);
+    li.append(title, actions);
+    li.addEventListener("click", () => selectConversation(c.id));
+    $convList.appendChild(li);
+  }
+}
+
+// ── Per-conversation kebab menu (⋯ → Rename / Export) ────────
+let $convMenu = null;
+
+function closeConvMenu() {
+  if ($convMenu) { $convMenu.remove(); $convMenu = null; }
+}
+
+function openConvMenu(anchorBtn, conv, titleEl) {
+  closeConvMenu();
+  const menu = document.createElement("div");
+  menu.className = "chat-conv-menu";
+  menu.setAttribute("role", "menu");
+
+  const items = [
+    { label: "Rename", action: () => startInlineRename(conv.id, titleEl) },
+    { label: "Export", action: () => exportConversation(conv) },
+  ];
+
+  for (const item of items) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "chat-conv-menu-item";
+    btn.textContent = item.label;
+    btn.setAttribute("role", "menuitem");
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      closeConvMenu();
+      item.action();
+    });
+    menu.appendChild(btn);
+  }
+
+  // Position: anchored to the right of the ⋯ button, opening downward.
+  const rect = anchorBtn.getBoundingClientRect();
+  menu.style.top = `${rect.bottom + 4}px`;
+  menu.style.left = `${rect.right - 120}px`; // align right edge near button
+  document.body.appendChild(menu);
+  $convMenu = menu;
+
+  // Close on outside click or Escape.
+  const onDocClick = (e) => {
+    if (!menu.contains(e.target)) { closeConvMenu(); cleanup(); }
+  };
+  const onKey = (e) => {
+    if (e.key === "Escape") { closeConvMenu(); cleanup(); }
+  };
+  function cleanup() {
+    document.removeEventListener("mousedown", onDocClick);
+    document.removeEventListener("keydown", onKey);
+  }
+  setTimeout(() => {
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+  }, 0);
+}
+
+/** Switch the active conversation and re-render. */
+function selectConversation(id) {
+  if (id === currentId || streaming) return;
+  currentId = id;
+  renderConvList();
+  renderConvTitle();
+  renderMessages();
+  updateTokenChip();
 }
 
 // ── Markdown rendering (assistant messages) ────────────────
@@ -484,8 +687,11 @@ function estimateTokens(text) {
   return Math.ceil((text?.length || 0) / 4);
 }
 
-/** Last server-reported prompt token count in this conversation (true used ctx). */
+/** Last server-reported prompt token count for this conversation. */
 function lastPromptCount(conv) {
+  // Prefer the value stored directly on the conversation (updated after each turn).
+  if (typeof conv?.prompt_tokens === "number") return conv.prompt_tokens;
+  // Fallback: scan messages (for conversations saved before this field existed).
   for (let i = (conv?.messages || []).length - 1; i >= 0; i--) {
     const m = conv.messages[i];
     if (m.role === "assistant" && typeof m.prompt_tokens === "number") return m.prompt_tokens;
@@ -505,17 +711,20 @@ function updateTokenChip() {
   // True used context from the server's last turn, plus a rough estimate of
   // whatever is currently typed (not yet sent).
   const draft = $input.value.trim() ? estimateTokens($input.value) + 1 : 0;
-  let label;
+  let used, approx;
   if (real != null) {
-    label = `${(real + draft).toLocaleString()} / ${ctx.toLocaleString()} tok`;
+    used = real + draft;
+    approx = false;
   } else {
     // No server data yet — fall back to a full estimate.
-    const est = estimateTokens([...(conv?.messages || []).map((m) => m.content), $input.value].join(" "));
-    label = `≈${est.toLocaleString()} / ${ctx.toLocaleString()} tok`;
+    used = estimateTokens([...(conv?.messages || []).map((m) => m.content), $input.value].join(" "));
+    approx = true;
   }
-  $tokens.textContent = label;
+  const pct = Math.min(100, Math.round((used / ctx) * 100));
+  $tokens.textContent = `${approx ? "≈" : ""}${pct}% ctx`;
+  $tokens.title = `${used.toLocaleString()} / ${ctx.toLocaleString()} tokens`;
   $tokens.classList.remove("is-hidden");
-  $tokens.classList.toggle("over", real != null && real + draft > ctx);
+  $tokens.classList.toggle("over", used > ctx);
 }
 
 // ── Streaming send ─────────────────────────────────────────
@@ -552,7 +761,7 @@ async function sendMessage() {
   conv.messages.push(userMsg);
   if (isFirstUserMsg) {
     conv.title = text.length > 42 ? `${text.slice(0, 42)}…` : text;
-    renderHistorySelect();
+    renderConvList();
   }
 
   $input.value = "";
@@ -659,6 +868,7 @@ async function _streamAssistantReply(conv, model) {
       assistantBody.parentElement.classList.add("error");
     }
   } finally {
+    if (liveTimer) { clearTimeout(liveTimer); liveTimer = null; } // prevent re-adding cursor after removal
     cursor.remove();
     streaming = false;
     setStreamingUI(false);
@@ -670,7 +880,10 @@ async function _streamAssistantReply(conv, model) {
       assistantBody.parentElement.remove();
     } else {
       const saved = { role: "assistant", content, model };
-      if (promptTokens != null) saved.prompt_tokens = promptTokens;
+      if (promptTokens != null) {
+        saved.prompt_tokens = promptTokens;
+        conv.prompt_tokens = promptTokens; // persist on the conversation itself
+      }
       if (completionTokens != null) saved.completion_tokens = completionTokens;
       conv.messages.push(saved);
       // Now that the stream is complete, render the full message as Markdown.
@@ -683,8 +896,8 @@ async function _streamAssistantReply(conv, model) {
 
 function setStreamingUI(on) {
   $send.disabled = on || !selectedModel() || !$input.value.trim();
-  $stop.classList.toggle("is-hidden", !on);
-  $input.placeholder = on ? "Generating…" : "Send a message… (Enter to send, Shift+Enter for newline)";
+  $stop.disabled = !on; // muted/gray when not streaming, active (red) while generating
+  $input.placeholder = on ? "Generating…" : "Send a message… ";
 }
 
 // ── Toast (page-local; mirrors core/uiMessage.js behaviour) ─
@@ -722,10 +935,20 @@ function renderThemeSelect() {
 // ── Init ───────────────────────────────────────────────────
 export function initChat() {
   loadState();
+  setSidebarCollapsed(localStorage.getItem(LS_SIDEBAR) === "1");
   renderThemeSelect();
   if (conversations.length === 0) newConversation();
-  else renderHistorySelect();
+  else { renderConvList(); renderConvTitle(); }
   renderMessages();
+
+  // Expand arrow lives in the main area (visible when collapsed);
+  // collapse arrow lives inside the sidebar next to "Conversations".
+  $expandBtn.addEventListener("click", () => setSidebarCollapsed(false));
+  if ($newTopbarBtn) $newTopbarBtn.addEventListener("click", () => {
+    if (streaming) return;
+    newConversation();
+  });
+  $collapseBtn.addEventListener("click", () => setSidebarCollapsed(true));
 
   $send.addEventListener("click", sendMessage);
   $stop.addEventListener("click", () => aborter?.abort());
@@ -734,20 +957,13 @@ export function initChat() {
     newConversation();
   });
 
-  $historySelect.addEventListener("change", () => {
-    currentId = $historySelect.value || null;
-    renderMessages();
-    updateTokenChip();
-  });
-  $deleteBtn.addEventListener("click", () => {
-    if (streaming) return;
+  $renameBtn.addEventListener("click", () => {
     const conv = currentConv();
-    if (conv && confirm(`Delete "${conv.title}"?`)) {
-      deleteConversation(conv.id);
-    }
+    if (conv) startInlineRename(conv.id, $convTitle);
   });
 
-  $exportBtn.addEventListener("click", exportConversation);
+  // Conversation selection + per-item rename/delete are wired in renderConvList().
+
   $importBtn.addEventListener("click", () => $importFile.click());
   $importFile.addEventListener("change", async (e) => {
     const file = e.target.files?.[0];
@@ -757,7 +973,6 @@ export function initChat() {
 
   $modelSelect.addEventListener("change", () => {
     localStorage.setItem(LS_MODEL, selectedModel());
-    setStatus("online", selectedModel() || "no model");
     setStreamingUI(false);
     updateTokenChip();
   });
@@ -776,5 +991,9 @@ export function initChat() {
     }
   });
 
-  loadModels().then(() => setStreamingUI(false));
+  // Populate the header context chip once models (and their ctx lengths) are known.
+  loadModels().then(() => {
+    setStreamingUI(false);
+    updateTokenChip();
+  });
 }

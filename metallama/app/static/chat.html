@@ -9,26 +9,66 @@
     <!-- highlight.js theme is applied at runtime from the saved setting (see features/chat/index.js) -->
   </head>
   <body class="chat-page">
-    <header class="chat-head">
-      <div class="chat-head-left">
-        <a class="logs-back" href="/" title="Back to Metallama">← Metallama</a>
-        <h1 class="chat-title">Chat</h1>
-        <span id="chat-status" class="status-badge offline">no model</span>
-      </div>
-      <div class="chat-head-right">
-        <select id="chat-history-select" class="chat-select" title="Saved conversations"></select>
-        <button id="chat-delete-btn" class="btn-secondary btn-small" type="button" title="Delete this conversation">✕ Delete</button>
-        <button id="chat-export-btn" class="btn-secondary btn-small" type="button" title="Download this conversation as JSON">↓ Export</button>
-        <button id="chat-import-btn" class="btn-secondary btn-small" type="button" title="Import a conversation from a JSON file">↑ Import</button>
-        <button id="chat-new-btn" class="btn-secondary btn-small" type="button" title="Start a new conversation">+ New</button>
-        <select id="chat-theme-select" class="chat-select" title="Code highlight theme"></select>
-        <select id="chat-model-select" class="chat-select" title="Model (running servers only)"></select>
+    <!-- Reintroduced app header with the Metallama logo -->
+    <header class="chat-topbar">
+      <div class="chat-topbar-inner">
+        <a class="chat-brand" href="/" title="Back to Metallama">
+          <img src="/static/logo.svg" alt="" class="chat-brand-logo" />
+          <span class="chat-brand-name">Metallama</span>
+          <span class="chat-brand-crumb">| Chat</span>
+        </a>
+        <div class="chat-topbar-center">
+          <div class="chat-conv-heading">
+            <span id="chat-conv-title" class="chat-conv-current"></span>
+            <button id="chat-rename-btn" class="btn-secondary btn-small chat-rename-btn" type="button" title="Rename this conversation">✎</button>
+          </div>
+        </div>
+        <div class="chat-topbar-right">
+          <span id="chat-conv-date" class="summary-chip chat-conv-date"></span>
+        </div>
       </div>
     </header>
 
-    <main id="chat-messages" class="chat-messages" aria-live="polite">
-      <p id="chat-empty" class="chat-empty is-hidden">No messages yet — pick a model and say hello.</p>
-    </main>
+    <div class="chat-shell">
+      <!-- Sidebar: conversations + import/export + settings (collapsible) -->
+      <aside class="chat-sidebar">
+        <div class="chat-sidebar-inner">
+          <section class="chat-side-section chat-side-convs">
+            <div class="chat-side-head">
+              <h2 class="chat-side-title">Conversations</h2>
+              <button id="chat-collapse-btn" class="chat-collapse-btn" type="button" title="Collapse sidebar" aria-expanded="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+              </button>
+            </div>
+            <ul id="chat-conv-list" class="chat-conv-list"></ul>
+            <div class="chat-side-foot">
+              <button id="chat-new-btn" class="btn-small chat-new-conv" type="button" title="Start a new conversation">New</button>
+              <button id="chat-import-btn" class="btn-secondary btn-small" type="button" title="Import a conversation from a JSON file">Import</button>
+            </div>
+          </section>
+
+          <section class="chat-side-section chat-side-settings">
+            <h2 class="chat-side-title">Settings</h2>
+            <label class="chat-field">
+              <span class="chat-field-label">Code theme</span>
+              <select id="chat-theme-select" class="chat-select" title="Syntax-highlight theme for code blocks"></select>
+            </label>
+          </section>
+        </div>
+      </aside>
+
+      <!-- Main chat column -->
+      <main class="chat-main">
+        <div class="chat-main-topbar">
+          <button id="chat-expand-btn" class="chat-icon-btn" type="button" title="Show conversations sidebar" aria-expanded="false">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+          </button>
+          <button id="chat-new-topbar-btn" class="chat-icon-btn" type="button" title="New conversation">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+        </div>
+        <p id="chat-empty" class="chat-empty is-hidden">No messages yet — pick a model and say hello.</p>
+        <div id="chat-messages" class="chat-messages" aria-live="polite"></div>
 
     <footer class="chat-input-bar">
       <div class="chat-input-wrap">
@@ -36,16 +76,21 @@
           id="chat-input"
           class="chat-textarea"
           rows="1"
-          placeholder="Send a message… (Enter to send, Shift+Enter for newline)"
+          placeholder="Send a message… "
           autocomplete="off"
         ></textarea>
         <div class="chat-input-actions">
-          <span id="chat-tokens" class="summary-chip chat-token-chip is-hidden"></span>
-          <button id="chat-stop-btn" class="btn-danger btn-small is-hidden" type="button">■ Stop</button>
+          <div class="chat-input-meta">
+            <select id="chat-model-select" class="chat-select chat-model-pill" title="Model (running servers only)"></select>
+            <span id="chat-tokens" class="summary-chip chat-token-chip is-hidden"></span>
+          </div>
           <button id="chat-send-btn" class="btn-primary btn-small" type="button" disabled>Send</button>
+          <button id="chat-stop-btn" class="btn-danger btn-small" type="button" disabled>■ Stop</button>
         </div>
       </div>
     </footer>
+      </main><!-- /.chat-main -->
+    </div><!-- /.chat-shell -->
 
     <input type="file" id="chat-import-file" accept=".json,application/json" hidden />
 
