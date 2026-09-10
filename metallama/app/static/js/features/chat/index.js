@@ -149,54 +149,64 @@ function deleteConversation(id) {
   renderMessages();
 }
 
-/** Inline-rename a conversation: swap `hostEl`'s text for an input. Shared by the
- *  header button and each sidebar item's ✎. Enter/blur saves, Esc cancels. */
-function startInlineRename(convId, hostEl) {
+// ── Rename modal ───────────────────────────────────────────
+let $renameModal = null;
+
+function closeRenameModal() {
+  if ($renameModal) { $renameModal.remove(); $renameModal = null; }
+}
+
+function openRenameModal(convId) {
   const conv = conversations.find((c) => c.id === convId);
   if (!conv || streaming) return;
+  closeRenameModal(); // only one at a time
 
-  const item = hostEl.closest(".chat-conv-item");
-  // Editor is appended to the row (sidebar) or the heading (header) so it can
-  // span the full width; the label itself is hidden either way.
-  const container = item || hostEl.parentElement;
-  if (item) item.classList.add("is-renaming");
-  hostEl.style.display = "none";
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal-dialog" style="max-width:420px">
+      <div class="modal-header">
+        <h2>Rename conversation</h2>
+        <button class="modal-close" type="button" title="Close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <input type="text" class="chat-rename-modal-input" placeholder="Conversation name" />
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" type="button" data-act="cancel">Cancel</button>
+        <button class="btn-primary" type="button" data-act="save">Save</button>
+      </div>
+    </div>`;
 
-  const input = document.createElement("input");
-  input.type = "text";
-  input.className = "chat-rename-input";
-  input.value = conv.title || "";
-  container.appendChild(input);
-  input.focus();
-  input.select();
+  const input = overlay.querySelector("input");
+  input.value = conv.title || ""; // set via property — no HTML injection
 
-  let done = false;
-  const finish = (commit) => {
-    if (done) return;
-    done = true;
-    if (item) item.classList.remove("is-renaming");
-    hostEl.style.display = "";
-    if (commit) {
-      const v = input.value.trim();
-      if (v && v !== conv.title) {
-        conv.title = v;
-        saveConvs();
-      } else if (!v) {
-        toast("Name can't be empty.", true);
-      }
+  const close = () => { overlay.remove(); $renameModal = null; };
+  const save = () => {
+    const v = input.value.trim();
+    if (!v) { toast("Name can't be empty.", true); return; }
+    if (v !== conv.title) {
+      conv.title = v;
+      saveConvs();
+      renderConvList();
+      renderConvTitle();
     }
-    renderConvList();
-    renderConvTitle();
+    close();
   };
 
-  // Don't let interaction with the editor bubble up to "select conversation".
-  input.addEventListener("mousedown", (e) => e.stopPropagation());
-  input.addEventListener("click", (e) => e.stopPropagation());
+  overlay.querySelector(".modal-close").addEventListener("click", close);
+  overlay.querySelector('[data-act="cancel"]').addEventListener("click", close);
+  overlay.querySelector('[data-act="save"]').addEventListener("click", save);
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
   input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { e.preventDefault(); finish(true); }
-    else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+    if (e.key === "Enter") { e.preventDefault(); save(); }
+    else if (e.key === "Escape") { e.preventDefault(); close(); }
   });
-  input.addEventListener("blur", () => finish(true));
+
+  document.body.appendChild(overlay);
+  $renameModal = overlay;
+  input.focus();
+  input.select();
 }
 
 // ── Import / Export ────────────────────────────────────────
@@ -223,12 +233,7 @@ function exportConversation(conv) {
     exported_at: new Date().toISOString(),
     model: selectedModel() || null,
     title: conv.title,
-    messages: conv.messages.map((m) => ({
-      role: m.role,
-      content: m.content,
-      ...(m.reasoning ? { reasoning: m.reasoning } : {}),
-      ...(m.reasoning_secs ? { reasoning_secs: m.reasoning_secs } : {}),
-    })),
+    messages: conv.messages.map((m) => ({ role: m.role, content: m.content })),
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -256,8 +261,6 @@ function normalizeMessages(raw) {
     if (!role || typeof content !== "string") continue;
     const msg = { role, content };
     if (typeof m.model === "string" && m.model) msg.model = m.model;
-    if (typeof m.reasoning === "string" && m.reasoning) msg.reasoning = m.reasoning;
-    if (typeof m.reasoning_secs === "number" && m.reasoning_secs) msg.reasoning_secs = m.reasoning_secs;
     out.push(msg);
   }
   return out;
@@ -432,7 +435,7 @@ function openConvMenu(anchorBtn, conv, titleEl) {
   menu.setAttribute("role", "menu");
 
   const items = [
-    { label: "Rename", action: () => startInlineRename(conv.id, titleEl) },
+    { label: "Rename", action: () => openRenameModal(conv.id) },
     { label: "Export", action: () => exportConversation(conv) },
   ];
 
@@ -612,43 +615,12 @@ function appendMessageEl(msg, animate = true) {
 
   const body = document.createElement("div");
   body.className = "chat-body";
-  if (msg.role === "assistant") {
-    // Reasoning ("thoughts") render as a dedicated collapsible message above the answer.
-    if (msg.reasoning) $messages.appendChild(buildThoughtsMessage(msg.reasoning, animate, msg.reasoning_secs));
-    renderMarkdown(body, msg.content);
-  } else {
-    body.textContent = msg.content;
-  }
+  if (msg.role === "assistant") renderMarkdown(body, msg.content);
+  else body.textContent = msg.content;
   el.appendChild(body);
 
   $messages.appendChild(el);
   return { el, body };
-}
-
-/** Dedicated collapsible "Thoughts" message showing a model's reasoning_content.
- *  The whole message is a single <details>; the summary reads "Thought for Xs"
- *  (or "Thoughts" when no duration is known). The body renders as Markdown. */
-function buildThoughtsMessage(reasoning, animate = true, secs = null) {
-  const details = document.createElement("details");
-  details.className = "chat-msg thoughts";
-  if (animate) details.classList.add("is-new");
-
-  const summary = document.createElement("summary");
-  const label = document.createElement("span");
-  label.textContent = secs ? `Thought for ${secs}s` : "Thoughts";
-  summary.appendChild(label);
-  details.appendChild(summary);
-
-  const body = document.createElement("div");
-  body.className = "chat-thoughts-body";
-  details.appendChild(body);
-  renderMarkdown(body, reasoning);
-  return details;
-}
-
-/** Re-render a thoughts message's body as Markdown (used while streaming). */
-function updateThoughtsBody(el, reasoning) {
-  renderMarkdown(el.querySelector(".chat-thoughts-body"), reasoning);
 }
 
 /** Inline-edit a user message: swap its body for an editor. On save, truncate the
@@ -815,7 +787,7 @@ async function sendMessage() {
  *  fresh send and an edit-and-regenerate. Assumes the user message is already in
  *  conv.messages (and rendered). */
 async function _streamAssistantReply(conv, model) {
-  const { el: assistantEl, body: assistantBody } = appendMessageEl(
+  const { body: assistantBody } = appendMessageEl(
     { role: "assistant", content: "", model },
     true,
   );
@@ -830,9 +802,6 @@ async function _streamAssistantReply(conv, model) {
   aborter = new AbortController();
 
   let content = "";
-  let reasoning = ""; // model "thoughts" (reasoning_content), streamed separately
-  let thoughtsEl = null;
-  let reasoningStart = null; // when the first reasoning token arrived (for the duration label)
   let promptTokens = null; // server-reported used context (true value)
   let completionTokens = null;
 
@@ -895,19 +864,6 @@ async function _streamAssistantReply(conv, model) {
           }
           lastFenceOpen = nowFenceOpen;
         }
-        // Reasoning deltas ("thoughts") stream in a dedicated collapsible message
-        // above the answer. Create it on first token, then update its text live.
-        const reasoningPiece = obj.message?.reasoning || "";
-        if (reasoningPiece) {
-          reasoning += reasoningPiece;
-          if (!thoughtsEl) {
-            reasoningStart = Date.now();
-            thoughtsEl = buildThoughtsMessage(reasoning, true);
-            $messages.insertBefore(thoughtsEl, assistantEl);
-          } else {
-            updateThoughtsBody(thoughtsEl, reasoning);
-          }
-        }
         // Real token counts arrive on the final done line (when upstream
         // supports stream_options.include_usage).
         if (typeof obj.prompt_eval_count === "number") promptTokens = obj.prompt_eval_count;
@@ -930,22 +886,11 @@ async function _streamAssistantReply(conv, model) {
 
     // Persist (drop the placeholder if nothing was produced).
     const last = conv.messages[conv.messages.length - 1];
-    if (!content && !reasoning) {
+    if (!content) {
       if (last && last.role === "assistant") conv.messages.pop();
       assistantBody.parentElement.remove();
     } else {
-      // Finalize the "Thought for Xs" label once streaming ends.
-      let reasoningSecs = null;
-      if (reasoning && reasoningStart) {
-        reasoningSecs = Math.max(1, Math.round((Date.now() - reasoningStart) / 1000));
-        const label = thoughtsEl?.querySelector("summary span");
-        if (label) label.textContent = `Thought for ${reasoningSecs}s`;
-      }
       const saved = { role: "assistant", content, model };
-      if (reasoning) {
-        saved.reasoning = reasoning;
-        if (reasoningSecs) saved.reasoning_secs = reasoningSecs;
-      }
       if (promptTokens != null) {
         saved.prompt_tokens = promptTokens;
         conv.prompt_tokens = promptTokens; // persist on the conversation itself
@@ -1025,7 +970,7 @@ export function initChat() {
 
   $renameBtn.addEventListener("click", () => {
     const conv = currentConv();
-    if (conv) startInlineRename(conv.id, $convTitle);
+    if (conv) openRenameModal(conv.id);
   });
 
   // Conversation selection + per-item rename/delete are wired in renderConvList().
