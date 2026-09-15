@@ -1,5 +1,6 @@
 import { api } from "../../core/api.js";
 import { copyToClipboard } from "../../core/clipboard.js";
+import { registerModal } from "../../core/modal.js";
 import { setConfigMessage } from "../../core/uiMessage.js";
 
 function base() {
@@ -57,27 +58,20 @@ export function setupConnect() {
     fillSnippets(e.target.value);
   });
 
+  const closeModal = () => modal.classList.add("is-hidden");
+  registerModal(modal, closeModal);
+
   modal.addEventListener("click", async (event) => {
     const target = event.target;
-    if (event.target === modal) {
-      modal.classList.add("is-hidden");
-      return;
-    }
     if (!(target instanceof HTMLButtonElement)) return;
     if (target.dataset.action === "connect-close") {
-      modal.classList.add("is-hidden");
+      closeModal();
     } else if (target.dataset.copy) {
       const el = document.getElementById(target.dataset.copy);
       if (el) {
         await copyToClipboard(el.textContent);
         setConfigMessage("Copied to clipboard");
       }
-    }
-  });
-
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && !modal.classList.contains("is-hidden")) {
-      modal.classList.add("is-hidden");
     }
   });
 }

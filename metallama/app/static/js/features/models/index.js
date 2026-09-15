@@ -1,5 +1,6 @@
 import { api } from "../../core/api.js";
 import { copyToClipboard } from "../../core/clipboard.js";
+import { registerModal } from "../../core/modal.js";
 import { setConfigMessage } from "../../core/uiMessage.js";
 
 const modelsEl = document.getElementById("models");
@@ -376,15 +377,8 @@ export function openCreateForModel(modelPath) {
   openCreateModal("managed", { model_path: modelPath });
 }
 
-// Returns true if `modal` is the front-most visible overlay. Overlays share a
-// z-index and stack by DOM order, so the last visible one in document order is
-// on top. Used to make Escape only affect the modal actually in focus — without
-// this, pressing Escape while two modals are stacked (e.g. edit + restart)
-// closes both at once because each has its own global keydown listener.
-function isTopmostModal(modal) {
-  const visible = [...document.querySelectorAll(".modal-overlay:not(.is-hidden)")];
-  return visible.length > 0 && visible[visible.length - 1] === modal;
-}
+// Backdrop-click and Escape dismissal for the overlays below are wired up via
+// registerModal() (see core/modal.js).
 
 function closeEditModal() {
   document.getElementById("edit-modal").classList.add("is-hidden");
@@ -1158,6 +1152,8 @@ export function setupModels() {
   // ── Modal event listeners ──────────────────────────────
   const modal = document.getElementById("edit-modal");
   if (modal) {
+    registerModal(modal, closeEditModal);
+
     modal.addEventListener("click", (event) => {
       const target = event.target;
       if (!(target instanceof HTMLButtonElement)) return;
@@ -1170,26 +1166,13 @@ export function setupModels() {
         deleteModal();
       }
     });
-
-    // Close on overlay click (outside dialog)
-    modal.addEventListener("click", (event) => {
-      if (event.target === modal) {
-        closeEditModal();
-      }
-    });
-
-    // Close on Escape key (only when this is the front-most open modal)
-    document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && !modal.classList.contains("is-hidden") && isTopmostModal(modal)) {
-        event.stopPropagation();
-        closeEditModal();
-      }
-    });
   }
 
   // ── Restart-on-save modal ─────────────────────────────
   const restartModal = document.getElementById("restart-modal");
   if (restartModal) {
+    registerModal(restartModal, closeRestartModal);
+
     restartModal.addEventListener("click", (event) => {
       const target = event.target;
       if (!(target instanceof HTMLButtonElement)) return;
@@ -1201,19 +1184,6 @@ export function setupModels() {
         const restart = selected ? selected.value : "now";
         closeRestartModal();
         doSaveEditModal(restart);
-      }
-    });
-
-    // Close on overlay click (outside dialog)
-    restartModal.addEventListener("click", (event) => {
-      if (event.target === restartModal) closeRestartModal();
-    });
-
-    // Close on Escape key (only when this is the front-most open modal)
-    document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && !restartModal.classList.contains("is-hidden") && isTopmostModal(restartModal)) {
-        event.stopPropagation();
-        closeRestartModal();
       }
     });
   }
@@ -1279,6 +1249,8 @@ export function setupModels() {
   }
 
   if (defaultsModal) {
+    registerModal(defaultsModal, closeDefaultsModal);
+
     defaultsModal.addEventListener("click", async (event) => {
       const target = event.target;
       if (!(target instanceof HTMLButtonElement)) return;
@@ -1298,10 +1270,6 @@ export function setupModels() {
           setConfigMessage(err.message, true);
         }
       }
-    });
-
-    defaultsModal.addEventListener("click", (event) => {
-      if (event.target === defaultsModal) closeDefaultsModal();
     });
   }
 }
