@@ -17,6 +17,7 @@ static/
       auth.js     — client auth state
       clipboard.js
       download.js
+      modal.js    — shared overlay dismissal
       uiMessage.js
     features/     — one module per UI feature
       models/     — model cards, start/stop, logs, edit/create
@@ -48,6 +49,21 @@ It also handles auth state (login modal, admin toggle) and the binary-missing wa
 - **Cross-module hooks**: some modules expose globals on `window` for interop, e.g.
   `window.__metallamaInvalidateModelCache` (models) and
   `window.__metallamaResumeDownload` (hf).
+- **Modal dismissal**: every overlay (`edit`, `restart`, `defaults`, `connect`,
+  `login`) registers via `core/modal.js` `registerModal(modal, close)`, which owns
+  two concerns:
+  - *Backdrop click*: only closes when the press **both** started and ended on the
+    overlay itself. A plain `click` listener comparing `event.target === overlay` is
+    wrong — `click` is dispatched on the nearest common ancestor of the pointerdown
+    and pointerup targets, so a text selection or scrollbar drag that is released on
+    the backdrop produces a click targeting the overlay and would destroy the modal
+    mid-edit.
+  - *Escape*: a single shared document listener closes only the **front-most** visible
+    overlay, ignores `defaultPrevented` events, and defers to an open native
+    `<select>` popup. It uses `stopImmediatePropagation()` so other document-level
+    Escape listeners don't act on the same keypress.
+  Stacking order is DOM order (`topmostOpenModal()`), so overlay elements must stay
+  ordered in `index.html` with the most-recently-opened last.
 - **Theming**: `document.documentElement.dataset.theme` is `light`/`dark`; preference
   is persisted in `localStorage` (`metallama.theme`), defaulting to `system`.
 - **Graphs**: `features/system/index.js` draws VRAM/RAM history on `<canvas>` with

@@ -10,6 +10,7 @@ Shared frontend utilities used across feature modules.
 | `auth.js` | Admin auth: login/logout, token storage, session verification, admin state callbacks |
 | `clipboard.js` | Copy-to-clipboard utility |
 | `download.js` | Trigger browser download from blob/URL |
+| `modal.js` | Shared overlay dismissal: `registerModal(modal, close)` wires backdrop-click + Escape; `topmostOpenModal()` / `isTopmostModal(modal)` |
 | `uiMessage.js` | Set/clear the global UI status message banner |
 
 ## Key Functions
@@ -25,6 +26,9 @@ Shared frontend utilities used across feature modules.
 | `onAdminChange()` | auth.js | Subscribe to admin state changes (login/logout) |
 | `setConfigMessage()` | uiMessage.js | Shows a status message in `#ui-message` element |
 | `copyToClipboard()` | clipboard.js | Copies text to clipboard with visual feedback |
+| `registerModal()` | modal.js | Registers an overlay's close callback; wires backdrop-click + front-most Escape dismissal |
+| `topmostOpenModal()` | modal.js | Returns the front-most visible `.modal-overlay`, or `null` |
+| `isTopmostModal()` | modal.js | Whether a given overlay is the front-most visible one |
 
 ## See Also
 - [JS entry point](./app-static-js.md)
