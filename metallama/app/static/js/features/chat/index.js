@@ -261,6 +261,8 @@ function normalizeMessages(raw) {
     if (!role || typeof content !== "string") continue;
     const msg = { role, content };
     if (typeof m.model === "string" && m.model) msg.model = m.model;
+    if (typeof m.reasoning === "string" && m.reasoning) msg.reasoning = m.reasoning;
+    if (typeof m.reasoning_secs === "number" && m.reasoning_secs) msg.reasoning_secs = m.reasoning_secs;
     out.push(msg);
   }
   return out;
@@ -619,8 +621,38 @@ function appendMessageEl(msg, animate = true) {
   else body.textContent = msg.content;
   el.appendChild(body);
 
+  // Reasoning ("thoughts") render as a compact collapsible block above the answer.
+  if (msg.role === "assistant" && msg.reasoning) {
+    $messages.appendChild(buildThoughtsMessage(msg.reasoning, animate, msg.reasoning_secs));
+  }
+
   $messages.appendChild(el);
   return { el, body };
+}
+
+/** Compact collapsible "Thoughts" block showing a model's reasoning_content.
+ *  A single <details>; the summary reads "Thought for Xs" (or "Thoughts"). */
+function buildThoughtsMessage(reasoning, animate = true, secs = null) {
+  const details = document.createElement("details");
+  details.className = "chat-msg thoughts";
+  if (animate) details.classList.add("is-new");
+
+  const summary = document.createElement("summary");
+  const label = document.createElement("span");
+  label.textContent = secs ? `Thought for ${secs}s` : "Thoughts";
+  summary.appendChild(label);
+  details.appendChild(summary);
+
+  const body = document.createElement("div");
+  body.className = "chat-thoughts-body";
+  details.appendChild(body);
+  renderMarkdown(body, reasoning);
+  return details;
+}
+
+/** Re-render a thoughts block's body as Markdown (used while streaming). */
+function updateThoughtsBody(el, reasoning) {
+  renderMarkdown(el.querySelector(".chat-thoughts-body"), reasoning);
 }
 
 /** Inline-edit a user message: swap its body for an editor. On save, truncate the
@@ -787,7 +819,7 @@ async function sendMessage() {
  *  fresh send and an edit-and-regenerate. Assumes the user message is already in
  *  conv.messages (and rendered). */
 async function _streamAssistantReply(conv, model) {
-  const { body: assistantBody } = appendMessageEl(
+  const { el: assistantEl, body: assistantBody } = appendMessageEl(
     { role: "assistant", content: "", model },
     true,
   );
@@ -802,6 +834,9 @@ async function _streamAssistantReply(conv, model) {
   aborter = new AbortController();
 
   let content = "";
+  let reasoning = ""; // model "thoughts" (reasoning_content), streamed separately
+  let thoughtsEl = null;
+  let reasoningStart = null; // when the first reasoning token arrived (for the duration label)
   let promptTokens = null; // server-reported used context (true value)
   let completionTokens = null;
 
@@ -864,6 +899,19 @@ async function _streamAssistantReply(conv, model) {
           }
           lastFenceOpen = nowFenceOpen;
         }
+        // Reasoning deltas ("thoughts") stream in a compact collapsible block
+        // above the answer. Create it on first token, then update it live.
+        const reasoningPiece = obj.message?.reasoning || "";
+        if (reasoningPiece) {
+          reasoning += reasoningPiece;
+          if (!thoughtsEl) {
+            reasoningStart = Date.now();
+            thoughtsEl = buildThoughtsMessage(reasoning, true);
+            $messages.insertBefore(thoughtsEl, assistantEl);
+          } else {
+            updateThoughtsBody(thoughtsEl, reasoning);
+          }
+        }
         // Real token counts arrive on the final done line (when upstream
         // supports stream_options.include_usage).
         if (typeof obj.prompt_eval_count === "number") promptTokens = obj.prompt_eval_count;
@@ -886,11 +934,22 @@ async function _streamAssistantReply(conv, model) {
 
     // Persist (drop the placeholder if nothing was produced).
     const last = conv.messages[conv.messages.length - 1];
-    if (!content) {
+    if (!content && !reasoning) {
       if (last && last.role === "assistant") conv.messages.pop();
       assistantBody.parentElement.remove();
     } else {
+      // Finalize the "Thought for Xs" label once streaming ends.
+      let reasoningSecs = null;
+      if (reasoning && reasoningStart) {
+        reasoningSecs = Math.max(1, Math.round((Date.now() - reasoningStart) / 1000));
+        const label = thoughtsEl?.querySelector("summary span");
+        if (label) label.textContent = `Thought for ${reasoningSecs}s`;
+      }
       const saved = { role: "assistant", content, model };
+      if (reasoning) {
+        saved.reasoning = reasoning;
+        if (reasoningSecs) saved.reasoning_secs = reasoningSecs;
+      }
       if (promptTokens != null) {
         saved.prompt_tokens = promptTokens;
         conv.prompt_tokens = promptTokens; // persist on the conversation itself

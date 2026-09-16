@@ -3141,10 +3141,16 @@ textarea:focus-visible {
 }
 
 /* ── Message list ──────────────────────────────────────── */
+/* The message list is constrained to the same 860px column as the input bar and
+   centered, so history never spans the full viewport on wide screens. On mobile
+   the viewport is narrower than 860px, so it naturally fills the width. */
 .chat-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 1.5rem 1.25rem 1rem;
+  width: 100%;
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 1.25rem 1.25rem 0.75rem;
 }
 
 .chat-inner,
@@ -3163,17 +3169,38 @@ textarea:focus-visible {
   padding-top: 3rem;
 }
 
+/* Messages are compact bubbles. Assistant messages are left-aligned panel
+   bubbles; user messages are right-aligned accent-tinted bubbles. Both share
+   the same max-width and border treatment so the column reads as one
+   conversation rather than two mismatched styles. */
 .chat-msg {
-  margin-bottom: 0.85rem;
-  padding: 0.6rem 1rem 0.7rem;
-  background: var(--panel);
+  margin-bottom: 0.5rem;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
+.chat-msg.assistant {
+  max-width: 85%;
+  margin-left: 0;
+  margin-right: auto;
+  width: fit-content;
+  padding: 0.5rem 0.9rem;
+  background: var(--panel-raised);
   border: var(--border-size) solid var(--line);
-  border-radius: var(--radius-sm);
+  border-radius: 0.9rem 0.9rem 0.35rem 0.9rem;
 }
 
 .chat-msg.user {
-  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
-  border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+  max-width: 85%;
+  margin-left: auto;
+  margin-right: 0;
+  width: fit-content;
+  padding: 0.5rem 0.9rem;
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+  border: var(--border-size) solid color-mix(in srgb, var(--accent) 22%, var(--line));
+  border-radius: 0.9rem 0.9rem 0.9rem 0.35rem;
 }
 
 .chat-msg.error .chat-body {
@@ -3194,16 +3221,20 @@ textarea:focus-visible {
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  font-size: 0.7rem;
+  font-size: 0.66rem;
   font-weight: 650;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.04em;
   color: var(--text-dim);
-  margin-bottom: 0.3rem;
+  margin-bottom: 0.15rem;
 }
 
 .chat-msg.user .chat-meta {
-  color: var(--blue);
+  color: var(--accent);
+}
+
+.chat-msg.assistant .chat-meta {
+  color: var(--muted);
 }
 
 .chat-body {
@@ -3221,6 +3252,71 @@ textarea:focus-visible {
 
 @keyframes chat-blink {
   50% { opacity: 0; }
+}
+
+/* ── Reasoning ("thoughts") — compact collapsible block ── */
+.chat-msg.thoughts {
+  margin-bottom: 0.25rem;
+  margin-left: 0;
+  margin-right: auto;
+  width: fit-content;
+  max-width: 85%;
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+
+.chat-msg.thoughts summary {
+  cursor: pointer;
+  user-select: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.66rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.chat-msg.thoughts summary::before {
+  content: "🧠";
+  font-size: 0.78rem;
+  line-height: 1;
+}
+
+.chat-thoughts-body {
+  white-space: normal;
+  word-break: break-word;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--muted);
+  padding: 0.35rem 0.6rem;
+  border-left: 2px solid var(--line-bright);
+  margin-top: 0.1rem;
+}
+
+/* Markdown inside the thoughts body (compact mirror of .chat-body.is-md). */
+.chat-thoughts-body.is-md { white-space: normal; }
+.chat-thoughts-body.is-md > :first-child { margin-top: 0; }
+.chat-thoughts-body.is-md > :last-child { margin-bottom: 0; }
+.chat-thoughts-body.is-md p { margin: 0.35rem 0; }
+.chat-thoughts-body.is-md ul, .chat-thoughts-body.is-md ol { margin: 0.35rem 0; padding-left: 1.2rem; }
+.chat-thoughts-body.is-md li { margin: 0.15rem 0; }
+.chat-thoughts-body.is-md :not(pre) > code {
+  background: var(--panel-raised);
+  border: var(--border-size) solid var(--line);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  font-size: 0.86em;
+}
+.chat-thoughts-body.is-md pre {
+  margin: 0.4rem 0;
+  padding: 0.5rem 0.6rem;
+  overflow-x: auto;
+  background: var(--panel-raised);
+  border: var(--border-size) solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
 }
 
 /* ── Input bar (no panel background — blends with the page) ─ */

@@ -85,14 +85,22 @@ It also handles auth state (login modal, admin toggle) and the binary-missing wa
 - **Reasoning ("thoughts") display**: the chat page renders a model's
   `reasoning_content` in a dedicated collapsible "Thoughts" chat message
   (`.chat-msg.thoughts`, a single `<details>` whose summary reads "Thought for Xs")
-  above the answer. The summary uses a `＋`/`−` collapse icon and gold text; the
-  body renders as Markdown (including code blocks). It streams live during
+  above the answer. The summary uses a 💭 icon and muted text; the body renders as
+  Markdown (including code blocks) with a left accent border. It streams live during
   generation and is persisted on the assistant message (`msg.reasoning` plus
   `msg.reasoning_secs` for the duration), included in exports, and restored on
   import.
-- **Message meta colors**: user messages show a blue "You" label; assistant
-  messages show the model name in the accent color; thoughts messages show a gold
-  "Thought for Xs" label.
+- **Message layout**: messages are compact bubbles that shrink to fit their
+  content (`width: fit-content`). The message list (`.chat-messages`) is
+  constrained to the same 860px column as the input bar and centered, so history
+  never spans the full viewport on wide screens (on mobile the viewport is
+  narrower than 860px, so it naturally fills the width). Assistant messages are
+  left-aligned panel bubbles (`.chat-msg.assistant`, max-width 85%, rounded
+  corners); user messages are right-aligned, accent-tinted bubbles
+  (`.chat-msg.user`, max-width 85%, rounded corners). Both share the same
+  max-width and border treatment so the column reads as one conversation. The
+  meta row is a small uppercase label: user messages use the accent color,
+  assistant messages use muted text.
 
 ## See Also
 - [Architecture](architecture.md)
