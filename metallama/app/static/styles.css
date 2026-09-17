@@ -1493,6 +1493,11 @@ body.admin-locked .disabled-readonly {
   color: var(--blue);
 }
 
+/* Header Chat link uses the same pill styling as the admin toggle. */
+.chat-link {
+  text-decoration: none;
+}
+
 .admin-toggle.active {
   background: var(--blue);
   color: #fff;

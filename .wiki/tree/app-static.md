@@ -6,7 +6,7 @@ Frontend static assets served by FastAPI at `/static`.
 
 | File | Purpose |
 |------|---------|
-| `index.html` | Main HTML page: banner, model cards, system info |
+| `index.html` | Main HTML page: header (with Chat link to `/chat`), model cards, system info |
 | `chat.html` | Standalone chat page served at `/chat` (conversations sidebar, model picker, image attachments) |
 | `logs.html` | Standalone log viewer page |
 | `styles.css` | Full stylesheet with light/dark theme support via CSS custom properties |

@@ -6,7 +6,7 @@ Static assets served by FastAPI at `/static` and `/` (index.html).
 
 | File | Purpose |
 |------|---------|
-| `index.html` | Single-page UI shell (all feature panels, modals, login) |
+| `index.html` | Single-page UI shell (all feature panels, modals, login; header has a Chat link to `/chat`) |
 | `chat.html` | Standalone chat page served at `/chat` |
 | `logs.html` | Standalone log viewer page |
 | `styles.css` | All styling, including shared controls, dark theme variables, and responsive server-card/library layouts |

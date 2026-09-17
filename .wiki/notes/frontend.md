@@ -40,6 +40,10 @@ static/
 
 It also handles auth state (login modal, admin toggle) and the binary-missing warning.
 
+Navigation between the two pages is plain links: the main page header has a Chat
+pill (`.chat-link`, `index.html`) linking to `/chat`, and the chat page brand
+(`.chat-brand`, `chat.html`) links back to `/`.
+
 ## Key Patterns
 
 - **API calls**: all requests go through `core/api.js` `api()`, which adds JSON + auth
@@ -99,9 +103,10 @@ It also handles auth state (login modal, admin toggle) and the binary-missing wa
   The message list (`.chat-messages`) is constrained to the same 1000px column
   as the input bar and centered, so history never spans the full viewport on
   wide screens (on mobile the viewport is narrower than the column, so it
-  naturally fills the width). The message list has no horizontal padding so
-  bubbles align exactly with the input textarea's edges (mobile adds `1.25rem`
-  side padding to match the input bar). The meta row is a small uppercase label:
+  naturally fills the width). The message list carries `1.25rem` horizontal
+  padding at all widths, matching the input bar, so bubbles don't touch the
+  sidebar or scrollbar and stay aligned with the textarea. The meta row is a
+  small uppercase label:
   user messages use the accent color, assistant messages use the green accent
   (matching the model selector pill). Scrollbars are thin and subtle, matching
   the dark theme (`scrollbar-width: thin` + `::-webkit-scrollbar` styling).
