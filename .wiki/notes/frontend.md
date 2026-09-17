@@ -20,6 +20,7 @@ static/
       modal.js    — shared overlay dismissal
       uiMessage.js
     features/     — one module per UI feature
+      chat/       — standalone /chat page (conversations, streaming, images)
       models/     — model cards, start/stop, logs, edit/create
       hf/         — HuggingFace search + downloads
       library/    — local model library
@@ -101,6 +102,21 @@ It also handles auth state (login modal, admin toggle) and the binary-missing wa
   max-width and border treatment so the column reads as one conversation. The
   meta row is a small uppercase label: user messages use the accent color,
   assistant messages use muted text.
+- **Chat image attachments (vision models)**: the `/chat` composer accepts images
+  via the file picker, clipboard paste, and drag & drop. The attach button is
+  enabled only when the selected model advertises `vision` in its `capabilities`
+  (from `/ollama/api/tags`). Images are downscaled to a 1024px long edge and
+  re-encoded (PNG stays PNG for text/screenshots, everything else becomes JPEG —
+  never WebP, which llama.cpp's `stb_image` cannot decode), capped at 8 per
+  message. Pixels are stored as Blobs in `features/chat/imageStore.js`, a
+  content-addressed IndexedDB store keyed by SHA-256 (deduplicates repeats, with
+  an in-memory fallback when IndexedDB is unavailable). Conversations keep only
+  `{id, w, h, bytes}` refs, so the localStorage conversation JSON stays small.
+  On send the refs are hydrated to `data:` URLs for the gateway, which already
+  converts Ollama `images` to OpenAI `image_url` content parts. User bubbles show
+  click-to-enlarge thumbnails, exports embed the images as data URLs, imports
+  re-store them, and the context chip adds a rough per-image token estimate until
+  the server's real `prompt_eval_count` arrives.
 
 ## See Also
 - [Architecture](architecture.md)

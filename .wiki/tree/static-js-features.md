@@ -6,6 +6,8 @@ One ES module per UI feature. Each exports a `setup*` function called from `main
 
 | File | Purpose |
 |------|---------|
+| `chat/index.js` | Standalone `/chat` page: conversations, streaming, reasoning, image attachments |
+| `chat/imageStore.js` | Content-addressed IndexedDB blob store for chat images (SHA-256 keys, orphan GC, memory fallback) |
 | `models/index.js` | Model cards: compact metadata/actions layout, start/stop, logs, slots, edit/create modal, filters |
 | `hf/index.js` | HuggingFace search panel + download orchestration |
 | `library/index.js` | Local model library: inventory, partial downloads, compact Serve/Rename/Delete action groups |

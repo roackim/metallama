@@ -3410,6 +3410,107 @@ textarea:focus-visible {
   border-color: color-mix(in srgb, var(--red) 50%, var(--line));
 }
 
+/* ── Image attachments (vision models) ──────────────────── */
+.chat-icon-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.chat-icon-btn:disabled:hover {
+  color: var(--text-dim);
+  border-color: var(--line);
+  background: var(--panel-raised);
+}
+
+/* Highlight the input while an image file is dragged over it. */
+.chat-input-wrap.is-dragover .chat-textarea {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--brand-glow, rgba(172, 122, 91, 0.2));
+}
+
+/* Pending attachments, shown in a strip above the textarea. */
+.chat-attach-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.chat-attach-thumb {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: var(--border-size) solid var(--line);
+  background: var(--panel-raised);
+}
+
+.chat-attach-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.chat-attach-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 0.7rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.chat-attach-remove:hover {
+  background: var(--red);
+}
+
+/* Images inside a sent user message. */
+.chat-body-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.35rem;
+}
+
+.chat-image {
+  max-width: 240px;
+  max-height: 240px;
+  display: block;
+  border-radius: var(--radius-sm);
+  border: var(--border-size) solid var(--line);
+  cursor: zoom-in;
+  background: var(--panel-raised);
+}
+
+.chat-image.is-missing {
+  width: 120px;
+  height: 90px;
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* Full-screen image viewer. */
+.chat-lightbox {
+  cursor: zoom-out;
+}
+
+.chat-lightbox img {
+  max-width: 92vw;
+  max-height: 92vh;
+  border-radius: var(--radius);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
+}
+
 @media (max-width: 720px) {
   /* Sidebar becomes a top strip above the chat column. */
   .chat-shell {

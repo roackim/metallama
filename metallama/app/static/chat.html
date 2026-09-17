@@ -72,6 +72,7 @@
 
     <footer class="chat-input-bar">
       <div class="chat-input-wrap">
+        <div id="chat-attach-strip" class="chat-attach-strip is-hidden" aria-label="Attached images"></div>
         <textarea
           id="chat-input"
           class="chat-textarea"
@@ -81,6 +82,9 @@
         ></textarea>
         <div class="chat-input-actions">
           <div class="chat-input-meta">
+            <button id="chat-attach-btn" class="chat-icon-btn" type="button" title="Attach images (vision models only)" aria-label="Attach images" disabled>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+            </button>
             <select id="chat-model-select" class="chat-select chat-model-pill" title="Model (running servers only)"></select>
             <span id="chat-tokens" class="summary-chip chat-token-chip is-hidden"></span>
           </div>
@@ -93,6 +97,7 @@
     </div><!-- /.chat-shell -->
 
     <input type="file" id="chat-import-file" accept=".json,application/json" hidden />
+    <input type="file" id="chat-attach-file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" multiple hidden />
 
     <p id="ui-message" class="ui-message"></p>
 
