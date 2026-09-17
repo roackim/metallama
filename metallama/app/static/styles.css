@@ -3179,15 +3179,15 @@ textarea:focus-visible {
 /* The message list is constrained to the same column as the input bar and
    centered, so history never spans the full viewport on wide screens. On mobile
    the viewport is narrower than the column, so it naturally fills the width.
-   No horizontal padding here — the bubbles carry their own padding, so the
-   message content aligns exactly with the input textarea's edges. */
+   Horizontal padding matches the input bar so bubbles don't touch the sidebar
+   (or the scrollbar) and stay aligned with the textarea. */
 .chat-messages {
   flex: 1;
   overflow-y: auto;
   width: 100%;
   max-width: 1000px;
   margin: 0 auto;
-  padding: 1.25rem 0 0.75rem;
+  padding: 1.25rem 1.25rem 0.75rem;
 }
 
 .chat-inner,
@@ -3551,12 +3551,6 @@ textarea:focus-visible {
     grid-template-columns: 1fr;
     grid-template-rows: auto minmax(0, 1fr);
     transition: grid-template-rows 0.2s ease;
-  }
-
-  /* Match the input bar's horizontal padding so bubbles align with the textarea. */
-  .chat-messages {
-    padding-left: 1.25rem;
-    padding-right: 1.25rem;
   }
 
   /* Collapsed on mobile = hide the strip (row height -> 0). */
