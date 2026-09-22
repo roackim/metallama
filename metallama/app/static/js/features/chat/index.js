@@ -130,9 +130,20 @@ function defaultTitle(ts) {
   return `New chat, ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()}`;
 }
 
+/** Conversation id that also works outside a secure context.
+ *
+ *  `crypto.randomUUID()` is only exposed in secure contexts (HTTPS or
+ *  localhost). This app is routinely reached over plain HTTP on a LAN, where
+ *  it is `undefined` and calling it throws — aborting initChat() before the
+ *  model list is ever fetched. Fall back to a time+random id there. */
+function newConversationId() {
+  if (globalThis.crypto?.randomUUID) return crypto.randomUUID();
+  return `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+}
+
 function newConversation() {
   const ts = Date.now();
-  const conv = { id: crypto.randomUUID(), title: defaultTitle(ts), messages: [], created_at: ts };
+  const conv = { id: newConversationId(), title: defaultTitle(ts), messages: [], created_at: ts };
   conversations.unshift(conv);
   currentId = conv.id;
   saveConvs();
@@ -368,7 +379,7 @@ async function importConversation(file) {
       ? (firstText.length > 42 ? `${firstText.slice(0, 42)}…` : firstText)
       : file.name;
   }
-  const conv = { id: crypto.randomUUID(), title, messages, created_at: Date.now() };
+  const conv = { id: newConversationId(), title, messages, created_at: Date.now() };
   conversations.unshift(conv);
   currentId = conv.id;
   saveConvs();
