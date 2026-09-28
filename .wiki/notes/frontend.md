@@ -82,11 +82,18 @@ pill (`.chat-link`, `index.html`) linking to `/chat`, and the chat page brand
   open/closed state is persisted in `localStorage` (`metallama.gpusSectionOpen`).
   The total graph is computed on-demand from the per-GPU histories of currently
   tracked GPUs, so untracking a GPU also removes its past data from the total.
-- **Reasoning efforts**: the server edit modal provides a master toggle plus
-  per-effort checkboxes. Enabling the master selects all inferred values; individual
-  values can then be disabled. Server cards display the enabled set as a
-  `Reasoning: ...` chip. Enabled values become virtual `name:effort` models in the
-  Ollama gateway.
+- **Reasoning efforts**: the server edit modal ("Allow reasoning efforts") provides a
+  master toggle plus per-effort checkboxes, populated from the efforts the chat
+  template supports (`none` included when it honours `enable_thinking`). These are
+  known without starting the server: read from `--chat-template-file` or the
+  template embedded in the GGUF, then replaced by the live `/props` probe. The checked
+  set is a **whitelist**: the effort is always chosen per request (see
+  [Reasoning efforts](api.md#reasoning-efforts)), and anything outside the set is
+  rejected with 400. A second toggle, "Virtualize models on effort"
+  (`virtualize_efforts`, off by default, disabled while efforts are off), also lists
+  each allowed value as a virtual `name:effort` model for clients that can't send an
+  effort parameter (e.g. VS Code). Server cards show the allowed set as effort
+  badges, prefixed with `:` (e.g. `:low`) when virtualized.
 - **Reasoning ("thoughts") display**: the chat page renders a model's
   `reasoning_content` in a dedicated collapsible "Thoughts" chat message
   (`.chat-msg.thoughts`, a single `<details>` whose summary reads "Thought for Xs")

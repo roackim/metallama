@@ -26,6 +26,7 @@ from .ollama.probe import probe_subservers
 from .ollama.registry import rebuild_registry as rebuild_ollama_registry
 from .ollama.routes.ollama import router as ollama_router
 from .ollama.routes.openai import router as openai_router
+from .ollama.routes.openrouter import router as openrouter_router
 from .profiles import MODEL_PROFILES
 from .runtime import (
     binary_health,
@@ -81,12 +82,15 @@ app = FastAPI(title="metallama", lifespan=lifespan)
 app.mount("/static", NoCacheStaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # ---------------------------------------------------------------------------
-# Ollama / OpenAI gateway (mounted at /ollama)
+# Model gateway: Ollama API at /ollama, OpenAI API at /openai (and /ollama/v1),
+# OpenRouter-flavoured API at /openrouter
 # ---------------------------------------------------------------------------
 
 rebuild_ollama_registry()
 app.include_router(ollama_router, prefix="/ollama")
-app.include_router(openai_router, prefix="/ollama")
+app.include_router(openai_router, prefix="/ollama")  # legacy: /ollama/v1/...
+app.include_router(openai_router, prefix="/openai")
+app.include_router(openrouter_router, prefix="/openrouter")
 app.include_router(hf_router)
 
 # Server-side history storage (500 samples at 1s = ~8 minutes)
@@ -1174,6 +1178,11 @@ async def update_model_config(model_name: str, payload: dict[str, Any] = Body(..
         if not isinstance(efforts, list) or not all(isinstance(e, str) for e in efforts):
             raise HTTPException(status_code=400, detail="reasoning_efforts must be a list of strings")
         updates["reasoning_efforts"] = [e.strip().lower() for e in efforts if e.strip()]
+
+    if "virtualize_efforts" in payload:
+        if not isinstance(payload["virtualize_efforts"], bool):
+            raise HTTPException(status_code=400, detail="virtualize_efforts must be a boolean")
+        updates["virtualize_efforts"] = payload["virtualize_efforts"]
 
     if updates:
         # Update config.yaml (machine-managed section)

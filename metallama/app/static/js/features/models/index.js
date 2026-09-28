@@ -234,6 +234,8 @@ function clearModalFields() {
   if (reasoningEnabled) reasoningEnabled.checked = false;
   const reasoningEfforts = document.getElementById("edit-reasoning-efforts");
   if (reasoningEfforts) reasoningEfforts.innerHTML = "";
+  const virtualize = document.getElementById("edit-virtualize-efforts");
+  if (virtualize) virtualize.checked = false;
   const warning = document.getElementById("edit-model-warning");
   if (warning) warning.classList.add("is-hidden");
   const mtpWarning = document.getElementById("edit-model-draft-warning");
@@ -243,17 +245,19 @@ function clearModalFields() {
 }
 
 // Populate the reasoning-effort checkboxes from the model's supported efforts
-// and the currently-enabled set.
-function populateReasoningEfforts(supported, enabled) {
+// and the currently-enabled set, plus the "virtualize models on effort" toggle.
+function populateReasoningEfforts(supported, enabled, virtualized) {
   const container = document.getElementById("edit-reasoning-efforts");
   const master = document.getElementById("edit-reasoning-enabled");
+  const virtualize = document.getElementById("edit-virtualize-efforts");
+  if (virtualize) virtualize.checked = Boolean(virtualized);
   const label = document.getElementById("edit-reasoning-label");
   if (!container || !master) return;
   const enabledSet = new Set(enabled || []);
   const supportedList = Array.isArray(supported) ? supported : [];
   if (label) label.textContent = supportedList.length
-    ? "Expose reasoning-effort models"
-    : "Expose reasoning-effort models (none available)";
+    ? "Allow reasoning efforts"
+    : "Allow reasoning efforts (none detected)";
   container.innerHTML = supportedList
     .map((effort) => `
       <label>
@@ -269,6 +273,7 @@ function populateReasoningEfforts(supported, enabled) {
     container.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
       cb.disabled = !master.checked;
     });
+    if (virtualize) virtualize.disabled = !master.checked;
   };
   master.addEventListener("change", () => {
     if (master.checked) {
@@ -279,6 +284,13 @@ function populateReasoningEfforts(supported, enabled) {
     setDisabled();
   });
   setDisabled();
+}
+
+// Whether allowed efforts are also exposed as virtual "name:effort" models.
+function collectVirtualizeEfforts() {
+  const master = document.getElementById("edit-reasoning-enabled");
+  const virtualize = document.getElementById("edit-virtualize-efforts");
+  return Boolean(master?.checked && virtualize?.checked);
 }
 
 // Read the reasoning-effort checkboxes. Returns [] if the master toggle is off.
@@ -320,7 +332,7 @@ function openEditModal(modelId, isManaged) {
       document.getElementById("edit-context-window").value = data.context_window || "";
       document.getElementById("edit-parallel").value = data.parallel || "";
       document.getElementById("edit-extra-args").value = (data.extra_args || []).join("\n");
-      populateReasoningEfforts(data.supported_reasoning_efforts, data.reasoning_efforts);
+      populateReasoningEfforts(data.supported_reasoning_efforts, data.reasoning_efforts, data.virtualize_efforts);
       // Populate model selector from available .gguf files
       loadModelFiles().then((mdata) => {
         populateModelSelector(mdata.files || [], data.model_path || "");
@@ -436,9 +448,10 @@ async function doSaveEditModal(restart) {
         .map((s) => s.trim())
         .filter(Boolean),
       reasoning_efforts: collectReasoningEfforts(),
+      virtualize_efforts: collectVirtualizeEfforts(),
     };
     Object.keys(payload).forEach((key) => {
-      if (key === "extra_args" || key === "name" || key === "model_path" || key === "model_draft" || key === "mmproj" || key === "reasoning_efforts") return;
+      if (key === "extra_args" || key === "name" || key === "model_path" || key === "model_draft" || key === "mmproj" || key === "reasoning_efforts" || key === "virtualize_efforts") return;
       if (isNaN(payload[key])) delete payload[key];
     });
     if (payload.name === "") delete payload.name;
@@ -824,9 +837,15 @@ function cardTemplate(model) {
   const reasoningEfforts = supportedReasoningEfforts
     ? configuredReasoningEfforts.filter((effort) => supportedReasoningEfforts.has(effort))
     : configuredReasoningEfforts;
+  // Virtualized efforts read as their model suffix (":low"), matching the
+  // "name:low" models clients see.
+  const effortPrefix = model.virtualize_efforts ? ":" : "";
   const reasoningEffortBadges = reasoningEfforts
-    .map((effort) => `<span class="reasoning-effort-badge ${escapeHtml(effort.toLowerCase())}">${escapeHtml(effort)}</span>`)
+    .map((effort) => `<span class="reasoning-effort-badge ${escapeHtml(effort.toLowerCase())}">${effortPrefix}${escapeHtml(effort)}</span>`)
     .join("");
+  const reasoningEffortTitle = model.virtualize_efforts
+    ? "Allowed reasoning efforts · also listed as name:effort models"
+    : "Allowed reasoning efforts · per request only";
   const slotsHtml = slotIndicators(model);
   const autoStartChip = isManaged
     ? `<label class="autostart-check admin-only" title="${model.auto_start ? "Auto-start on launch · click to disable" : "Auto-start on launch · currently off — click to enable"}"><input type="checkbox" data-id="${model.id}" data-action="autostart" ${model.auto_start ? "checked" : ""}><span>auto-start</span></label>`
@@ -844,7 +863,7 @@ function cardTemplate(model) {
         <div class="title-wrap">
           <h3>${model.display_name}</h3>
           ${stem ? `<span class="card-model-stem">${escapeHtml(stem)}</span>` : ""}
-          ${reasoningEffortBadges ? `<span class="reasoning-effort-badges">${reasoningEffortBadges}</span>` : ""}
+          ${reasoningEffortBadges ? `<span class="reasoning-effort-badges" title="${reasoningEffortTitle}">${reasoningEffortBadges}</span>` : ""}
         </div>
         <div class="header-badges">
           <span class="locality-badge ${isManaged ? "local" : "remote"}">${isManaged ? "Local" : "Remote"}</span>

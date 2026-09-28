@@ -11,7 +11,14 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from ...http_client import shared_client
 from ..probe import probe_one, _DEFAULT_CONTEXT_LENGTH
-from ..registry import get_subserver, get_all_subservers
+from ..registry import (
+    effective_reasoning_efforts,
+    virtual_efforts,
+    get_all_subservers,
+    get_subserver,
+    resolve_reasoning_effort,
+    split_virtual_model,
+)
 from ..schemas import OllamaChatRequest, OllamaGenerateRequest, OllamaShowRequest
 
 router = APIRouter()
@@ -26,6 +33,16 @@ def _digest(name: str) -> str:
 
 def _now() -> str:
     return datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _capabilities(srv: Any, *extra: str) -> list[str]:
+    """Ollama capability list; "thinking" tells clients they may send `think`."""
+    caps = ["completion", *extra]
+    if srv.vision:
+        caps.append("vision")
+    if srv.supported_reasoning_efforts:
+        caps.append("thinking")
+    return caps
 
 
 # ---------------------------------------------------------------------------
@@ -51,11 +68,8 @@ async def list_tags() -> JSONResponse:
             arch = srv.upstream_meta.get("general.architecture", srv.family)
             quant = srv.upstream_meta.get("quantization", "unknown")
             model_name = srv.name
-            families = [arch]
-            capabilities = ["completion"]
-            if srv.vision:
-                capabilities.append("vision")
-                families.append("clip")
+            families = [arch, "clip"] if srv.vision else [arch]
+            allowed_efforts = effective_reasoning_efforts(srv)
             base_entry = {
                 "name": model_name,
                 "model": model_name,
@@ -70,15 +84,13 @@ async def list_tags() -> JSONResponse:
                     "quantization_level": quant,
                     "context_length": srv.context_length,
                 },
-                "capabilities": capabilities,
+                "capabilities": _capabilities(srv),
+                "reasoning_efforts": allowed_efforts,
             }
-            # Virtual reasoning-effort models (e.g. "name:low", "name:high"),
-            # derived from the server's effective (enabled ∩ supported) efforts.
-            from ..registry import effective_reasoning_efforts
-            effective_efforts = effective_reasoning_efforts(srv)
-            if not effective_efforts:
-                models.append(base_entry)
-            for effort in effective_efforts:
+            models.append(base_entry)
+            # Virtual "name:effort" models for clients that can't send an effort
+            # parameter; clients that can should use the base model + `think`.
+            for effort in virtual_efforts(srv):
                 vname = f"{model_name}:{effort}"
                 models.append({
                     **base_entry,
@@ -148,12 +160,8 @@ async def show(req: OllamaShowRequest) -> JSONResponse:
     arch = srv.upstream_meta.get("general.architecture", srv.family)
     n_embd = srv.upstream_meta.get("n_embd", 4096)
     quant = srv.upstream_meta.get("quantization", "unknown")
-    model_name = srv.name
-    families = [arch]
-    capabilities = ["completion", "tools"]
-    if srv.vision:
-        capabilities.append("vision")
-        families.append("clip")
+    model_name = req.model_name
+    families = [arch, "clip"] if srv.vision else [arch]
     model_info = {
         "general.architecture": arch,
         "general.parameter_count": srv.parameter_size,
@@ -177,7 +185,8 @@ async def show(req: OllamaShowRequest) -> JSONResponse:
             "model_info": model_info,
             "modelinfo": model_info,
             "parameters": f"num_ctx {srv.context_length}\nstop \"<|im_end|>\"",
-            "capabilities": capabilities,
+            "capabilities": _capabilities(srv, "tools"),
+            "reasoning_efforts": effective_reasoning_efforts(srv),
         }
     )
 
@@ -205,74 +214,20 @@ def _translate_options(options: dict[str, Any] | None) -> dict[str, Any]:
     return {_OPTION_MAP[k]: v for k, v in options.items() if k in _OPTION_MAP}
 
 
-# Reasoning effort → llama-server reasoning_effort + reasoning_budget.
-# "none"/0 disables thinking; high = unrestricted (-1).
-# Qwen 3.x supports low / medium / high / xhigh.
-_REASONING_EFFORT_MAP: dict[str, tuple[str, int]] = {
-    "none": ("none", 0),
-    "low": ("low", 1024),
-    "medium": ("medium", 4096),
-    "high": ("high", -1),
-    "xhigh": ("xhigh", -1),
-}
+def _apply_reasoning_effort(payload: dict[str, Any], srv: Any, model_name: str, body: dict[str, Any]) -> None:
+    """Set the request's reasoning effort on an upstream OpenAI-style payload.
 
-
-def _extract_reasoning_effort(body: dict[str, Any]) -> str | None:
-    """Pull a reasoning_effort value from the request body.
-
-    Sources, in priority order:
-    - top-level `reasoning_effort`
-    - `options.reasoning_effort`
+    llama-server feeds top-level `reasoning_effort` to the chat template and
+    maps "none" to enable_thinking=false. No token budget is sent: budgets
+    hard-cut the reasoning, so the effort is left to the model.
     """
-    top = body.get("reasoning_effort")
-    if top is not None:
-        return str(top).lower()
-    options = body.get("options")
-    if isinstance(options, dict):
-        val = options.get("reasoning_effort")
-        if val is not None:
-            return str(val).lower()
-    return None
-
-
-def _apply_reasoning_effort(payload: dict[str, Any], body: dict[str, Any], model_name: str | None = None) -> None:
-    """Map a client reasoning_effort onto the llama-server payload.
-
-    The effort can come from (in priority order):
-    1. the virtual model name suffix (e.g. "name:high")
-    2. top-level `reasoning_effort`
-    3. `options.reasoning_effort`
-
-    Sets `reasoning_effort`, `reasoning_budget`, and `chat_template_kwargs`
-    so both string and token-budget strategies are covered for template
-    compatibility.
-    """
-    raw = None
-    # 1. Virtual model suffix takes priority.
-    if model_name:
-        from ..registry import split_virtual_model
-        _, suffix = split_virtual_model(model_name)
-        if suffix:
-            raw = suffix
-    # 2/3. Explicit body/options effort.
-    if raw is None:
-        raw = _extract_reasoning_effort(body)
-    if raw is None:
-        return
-    # Accept numeric 0 as "none".
-    if raw == "0":
-        raw = "none"
-    # Known values map to a budget; unknown values pass through as-is so
-    # llama-server can accept model-specific efforts (e.g. "xhigh").
-    if raw in _REASONING_EFFORT_MAP:
-        effort, budget = _REASONING_EFFORT_MAP[raw]
+    effort = resolve_reasoning_effort(srv, model_name, body)
+    payload.pop("think", None)
+    payload.pop("reasoning", None)
+    if effort is None:
+        payload.pop("reasoning_effort", None)
     else:
-        effort, budget = raw, -1
-    payload["reasoning_effort"] = effort
-    payload["reasoning_budget"] = budget
-    kwargs = dict(payload.get("chat_template_kwargs") or {})
-    kwargs["reasoning_effort"] = effort
-    payload["chat_template_kwargs"] = kwargs
+        payload["reasoning_effort"] = effort
 
 
 def _ollama_message_to_openai(m: Any) -> dict[str, Any]:
@@ -389,7 +344,7 @@ async def _stream_chat(model: str, resp: httpx.Response) -> AsyncIterator[str]:
             yield json.dumps({
                 "model": model,
                 "created_at": _now(),
-                "message": {"role": "assistant", "content": "", "reasoning": reasoning},
+                "message": {"role": "assistant", "content": "", "thinking": reasoning},
                 "done": False,
             }) + "\n"
 
@@ -433,9 +388,7 @@ async def _stream_chat(model: str, resp: httpx.Response) -> AsyncIterator[str]:
 async def chat(req: OllamaChatRequest) -> StreamingResponse | JSONResponse:
     srv = get_subserver(req.model)
     body = req.model_dump(exclude_none=True)
-    # Resolve the base model name (strip any virtual reasoning-effort suffix)
-    # so llama-server receives the real model id, not "name:xhigh".
-    from ..registry import split_virtual_model
+    # Send the real model id upstream, not the virtual "name:low".
     base_model, _ = split_virtual_model(req.model)
     payload: dict[str, Any] = {
         "model": base_model,
@@ -453,7 +406,7 @@ async def chat(req: OllamaChatRequest) -> StreamingResponse | JSONResponse:
     if req.stream:
         client_opts = body.get("stream_options") or {}
         payload["stream_options"] = {"include_usage": True, **client_opts}
-    _apply_reasoning_effort(payload, body, req.model)
+    _apply_reasoning_effort(payload, srv, req.model, body)
 
     if req.stream:
         async def generate() -> AsyncIterator[bytes]:
@@ -488,10 +441,10 @@ async def chat(req: OllamaChatRequest) -> StreamingResponse | JSONResponse:
     choice = data.get("choices", [{}])[0]
     message = choice.get("message", {})
     out_message: dict[str, Any] = {"role": "assistant", "content": message.get("content") or ""}
-    # Expose reasoning content (llama-server returns it as reasoning_content).
+    # llama-server returns reasoning as reasoning_content; Ollama calls it thinking.
     reasoning = message.get("reasoning_content")
     if reasoning:
-        out_message["reasoning"] = reasoning
+        out_message["thinking"] = reasoning
     if message.get("tool_calls"):
         out_message["tool_calls"] = _openai_tool_calls_to_ollama(message["tool_calls"])
     usage = data.get("usage", {})
@@ -528,7 +481,6 @@ async def _stream_generate(model: str, resp: httpx.Response) -> AsyncIterator[st
 @router.post("/api/generate", response_model=None)
 async def generate_endpoint(req: OllamaGenerateRequest) -> StreamingResponse | JSONResponse:
     srv = get_subserver(req.model)
-    from ..registry import split_virtual_model
     base_model, _ = split_virtual_model(req.model)
     payload = {
         "model": base_model,

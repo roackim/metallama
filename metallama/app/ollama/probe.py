@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 import re
+import shlex
+from pathlib import Path
 from typing import Any
 
 import httpx
 
-from .registry import get_all_subservers
+from ..gguf import read_chat_template
+from .registry import REASONING_EFFORTS, get_all_subservers
 from .schemas import SubserverConfig
 
 _PROBE_TIMEOUT = httpx.Timeout(3.0)
-
-# Known reasoning-effort values (ordered by increasing effort). Used to filter
-# values inferred from a chat template so we only surface recognized levels.
-KNOWN_REASONING_EFFORTS = ("none", "low", "medium", "high", "xhigh")
 
 
 def _infer_reasoning_efforts(chat_template: str) -> list[str]:
@@ -21,8 +20,10 @@ def _infer_reasoning_efforts(chat_template: str) -> list[str]:
     Scans the Jinja template for string literals compared against
     `reasoning_effort` / `resolved_reasoning_effort` (e.g.
     `reasoning_effort == 'high'`, `not in ('xhigh', 'medium', 'low')`).
-    Returns recognized values in canonical order. Empty if the template
-    doesn't reference reasoning effort at all.
+    "none" is supported when the template honours `enable_thinking`, which
+    llama-server sets to false for reasoning_effort "none". Returns recognized
+    values in canonical order. Empty if the template doesn't reference
+    reasoning effort at all.
     """
     if not chat_template:
         return []
@@ -40,8 +41,48 @@ def _infer_reasoning_efforts(chat_template: str) -> list[str]:
     ):
         for lit in re.findall(r"['\"]([a-zA-Z0-9_]+)['\"]", m.group(1)):
             found.add(lit)
+    if found and "enable_thinking" in chat_template:
+        found.add("none")
     # Keep only recognized values, in canonical order.
-    return [v for v in KNOWN_REASONING_EFFORTS if v in found]
+    return [v for v in REASONING_EFFORTS if v in found]
+
+
+def _infer_default_effort(chat_template: str) -> str | None:
+    """The effort a template applies when the request sends none.
+
+    Matches `reasoning_effort|default('xhigh')`. None if the template doesn't
+    declare one.
+    """
+    m = re.search(
+        r"reasoning_effort\s*\|\s*default\(\s*['\"]([a-zA-Z0-9_]+)['\"]",
+        chat_template or "",
+    )
+    return m.group(1) if m and m.group(1) in REASONING_EFFORTS else None
+
+
+def server_chat_template(model_path: str | None, extra_args: list[str]) -> str:
+    """The chat template a managed server will use, read without starting it.
+
+    `--chat-template-file` from the server's extra args, else the template
+    embedded in the GGUF. A builtin `--chat-template NAME` can't be read
+    offline, so it yields "" until the server is probed.
+    """
+    tokens = [t for arg in extra_args for t in shlex.split(arg)]
+    for i, tok in enumerate(tokens):
+        if tok.startswith("--chat-template-file"):
+            path = tok.partition("=")[2] or (tokens[i + 1] if i + 1 < len(tokens) else "")
+            try:
+                return Path(path).read_text(errors="replace")
+            except OSError:
+                return ""
+        if tok == "--chat-template" or tok.startswith("--chat-template="):
+            return ""
+    return (read_chat_template(model_path) or "") if model_path else ""
+
+
+def template_reasoning_efforts(model_path: str | None, extra_args: list[str]) -> list[str]:
+    """Reasoning efforts a managed server will support, without starting it."""
+    return _infer_reasoning_efforts(server_chat_template(model_path, extra_args))
 
 
 def _fallback_arch(current_family: str) -> str:
@@ -109,9 +150,9 @@ async def probe_one(srv: SubserverConfig, client: httpx.AsyncClient) -> None:
                 if isinstance(modalities, dict):
                     srv.vision = bool(modalities.get("vision"))
                 # Infer which reasoning-effort values the chat template supports.
-                srv.supported_reasoning_efforts = _infer_reasoning_efforts(
-                    props_payload.get("chat_template") or ""
-                )
+                chat_template = props_payload.get("chat_template") or ""
+                srv.supported_reasoning_efforts = _infer_reasoning_efforts(chat_template)
+                srv.default_reasoning_effort = _infer_default_effort(chat_template)
     except (httpx.ConnectError, httpx.TimeoutException, ValueError):
         pass
 

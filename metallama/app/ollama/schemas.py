@@ -21,10 +21,14 @@ class SubserverConfig(BaseModel):
     # Reasoning-effort values the model's chat template actually supports,
     # inferred from /props -> chat_template during probing (e.g. ["low","xhigh"]).
     supported_reasoning_efforts: list[str] = Field(default_factory=list)
+    # Effort the template applies when a request sends none (e.g. "xhigh").
+    default_reasoning_effort: Optional[str] = None
     # Reasoning-effort values the user has ENABLED as virtual models
     # (e.g. ["low", "xhigh"]). Empty = virtual efforts disabled entirely.
     # The effective set exposed is enabled ∩ supported.
     reasoning_efforts: list[str] = Field(default_factory=list)
+    # Whether allowed efforts are also exposed as virtual "name:effort" models.
+    virtualize_efforts: bool = False
 
 
 class AppConfig(BaseModel):

@@ -1238,7 +1238,7 @@ async function _streamAssistantReply(conv, model) {
         }
         // Reasoning deltas ("thoughts") stream in a compact collapsible block
         // above the answer. Create it on first token, then update it live.
-        const reasoningPiece = obj.message?.reasoning || "";
+        const reasoningPiece = obj.message?.thinking || obj.message?.reasoning || "";
         if (reasoningPiece) {
           reasoning += reasoningPiece;
           if (!thoughtsEl) {

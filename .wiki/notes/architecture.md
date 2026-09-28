@@ -23,10 +23,11 @@ Metallama is a **llama.cpp process manager** — a single-process FastAPI applic
 │    • managed_servers (local models)                     │
 │    • remote_servers (distant endpoints)                 │
 ├─────────────────────────────────────────────────────────┤
-│  Ollama / OpenAI Gateway (app/ollama/)                  │
-│  Mounted at /ollama, proxies to upstream servers:       │
-│    • Ollama API: /api/tags, /api/chat, /api/generate…   │
-│    • OpenAI API: /v1/chat/completions, /v1/models…      │
+│  Model Gateway (app/ollama/)                            │
+│  Proxies to upstream servers:                           │
+│    • /openai: OpenAI API passthrough (chat, responses…) │
+│    • /openrouter: OpenRouter dialect over /openai       │
+│    • /ollama: Ollama API (translated) + legacy /v1      │
 ├─────────────────────────────────────────────────────────┤
 │  Runtime (app/runtime.py)                               │
 │  Process management: Popen, health checks, locks        │
