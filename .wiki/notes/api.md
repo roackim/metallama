@@ -112,6 +112,12 @@ Streaming behaviour (for clients with a read timeout):
   retry with backoff), not 502. There is no `/props` route on purpose: it would
   override per-model facts in clients that read it.
 
+`/openai/v1/models` entries also carry `architecture: {input_modalities: ["text"] | ["text",
+"image"], output_modalities: ["text"]}`, from the same probe as `meta.vision`. It is
+**omitted** while vision is unknown (`vision_known` is false until `/props` has reported
+modalities), because clients read absence as "unknown" and a list without `"image"` as a
+definite no.
+
 Each `/v1/models` entry with allowed efforts also carries OpenRouter's reasoning
 advertisement: `supported_parameters: ["include_reasoning", "reasoning",
 "reasoning_effort"]` and `reasoning: {mandatory, default_enabled, supported_efforts,

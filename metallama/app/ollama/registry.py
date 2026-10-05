@@ -150,6 +150,7 @@ def rebuild_registry() -> None:
             srv.upstream_model_id = old.upstream_model_id
             srv.upstream_meta = old.upstream_meta
             srv.vision = old.vision
+            srv.vision_known = old.vision_known
             srv.supported_reasoning_efforts = old.supported_reasoning_efforts
             srv.default_reasoning_effort = old.default_reasoning_effort
             srv.size = srv.size or old.size

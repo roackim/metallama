@@ -149,6 +149,7 @@ async def probe_one(srv: SubserverConfig, client: httpx.AsyncClient) -> None:
                 modalities = props_payload.get("modalities")
                 if isinstance(modalities, dict):
                     srv.vision = bool(modalities.get("vision"))
+                    srv.vision_known = True
                 # Infer which reasoning-effort values the chat template supports.
                 chat_template = props_payload.get("chat_template") or ""
                 srv.supported_reasoning_efforts = _infer_reasoning_efforts(chat_template)

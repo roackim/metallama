@@ -107,6 +107,12 @@ async def list_models() -> JSONResponse:
                 "reasoning_efforts": allowed_efforts,
             },
             "context_length": srv.context_length,
+            # Omitted while vision is unknown: absence means "unknown" to clients,
+            # a list without "image" means a definite no.
+            **({"architecture": {
+                "input_modalities": ["text", "image"] if srv.vision else ["text"],
+                "output_modalities": ["text"],
+            }} if srv.vision_known else {}),
             **_reasoning_fields(allowed_efforts, srv.default_reasoning_effort),
         }
         models.append(base_entry)

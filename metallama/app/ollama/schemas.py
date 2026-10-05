@@ -18,6 +18,9 @@ class SubserverConfig(BaseModel):
     # Whether the upstream model supports vision (multimodal projector / mmproj).
     # Detected from llama-server's /props -> modalities.vision during probing.
     vision: bool = False
+    # True once /props has actually reported modalities (False = vision is unknown,
+    # not "text-only"), so listings can omit what they can't state.
+    vision_known: bool = False
     # Reasoning-effort values the model's chat template actually supports,
     # inferred from /props -> chat_template during probing (e.g. ["low","xhigh"]).
     supported_reasoning_efforts: list[str] = Field(default_factory=list)
