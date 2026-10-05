@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.exceptions import RequestValidationError
+from fastapi.routing import APIRoute
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from ...http_client import shared_client
+from ...http_client import get_client, shared_client
 from ..probe import probe_one, _DEFAULT_CONTEXT_LENGTH
 from ..registry import (
     effective_reasoning_efforts,
@@ -19,9 +22,36 @@ from ..registry import (
     resolve_reasoning_effort,
     split_virtual_model,
 )
+from ..replay import apply_replay
 from ..schemas import OllamaChatRequest, OllamaGenerateRequest, OllamaShowRequest
 
-router = APIRouter()
+class _OllamaRoute(APIRoute):
+    """Errors in Ollama's shape: `{"error": "message"}` with the real status.
+
+    FastAPI renders HTTPException as `{"detail": ...}`, which Ollama clients
+    don't read (they take the top-level `error`).
+    """
+
+    def get_route_handler(self):
+        handler = super().get_route_handler()
+
+        async def wrapped(request: Request) -> Response:
+            try:
+                return await handler(request)
+            except HTTPException as exc:
+                detail = exc.detail
+                message = detail.get("error") if isinstance(detail, dict) else detail
+                return JSONResponse({"error": str(message)}, status_code=exc.status_code)
+            except RequestValidationError as exc:
+                first = exc.errors()[0] if exc.errors() else {}
+                where = ".".join(str(x) for x in first.get("loc", ())[1:])
+                return JSONResponse({"error": f"invalid request: {where}: {first.get('msg', 'invalid')}".replace(": :", ":")},
+                                    status_code=400)
+
+        return wrapped
+
+
+router = APIRouter(route_class=_OllamaRoute)
 
 _TIMEOUT = httpx.Timeout(connect=5.0, read=600.0, write=30.0, pool=5.0)
 _HEALTH_TIMEOUT = httpx.Timeout(1.0)
@@ -244,6 +274,10 @@ def _ollama_message_to_openai(m: Any) -> dict[str, Any]:
         out["tool_call_id"] = m.tool_call_id or m.tool_name or "call_0"
         if m.tool_name:
             out["name"] = m.tool_name
+    thinking = (m.model_extra or {}).get("thinking")
+    if m.role == "assistant" and isinstance(thinking, str) and thinking:
+        # Ollama clients send the reasoning back as `thinking`.
+        out["reasoning_content"] = thinking
     if m.tool_calls:
         calls = []
         for i, tc in enumerate(m.tool_calls):
@@ -291,6 +325,61 @@ def _openai_tool_calls_to_ollama(calls: list[dict[str, Any]]) -> list[dict[str, 
     return out
 
 
+def _durations(started: float, timings: dict[str, Any]) -> dict[str, int]:
+    """Ollama's nanosecond duration fields, from llama-server's `timings` (ms).
+
+    `total_duration` is wall clock from the gateway; llama-server doesn't report
+    load time (the model is already resident), so `load_duration` is 0.
+    """
+    prompt_ns = int(float(timings.get("prompt_ms") or 0) * 1e6)
+    eval_ns = int(float(timings.get("predicted_ms") or 0) * 1e6)
+    total_ns = int((time.monotonic() - started) * 1e9)
+    return {
+        "total_duration": max(total_ns, prompt_ns + eval_ns),
+        "load_duration": 0,
+        "prompt_eval_duration": prompt_ns,
+        "eval_duration": eval_ns,
+    }
+
+
+def _upstream_message(raw: bytes | str) -> str:
+    """The human message of an upstream error body, else its (truncated) text."""
+    text = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw
+    try:
+        err = json.loads(text).get("error")
+        if isinstance(err, dict) and isinstance(err.get("message"), str):
+            return err["message"]
+        if isinstance(err, str):
+            return err
+    except (ValueError, AttributeError):
+        pass
+    return text[:300] or "upstream error"
+
+
+async def _open(srv: Any, path: str, payload: dict[str, Any]) -> httpx.Response:
+    """POST to the model server and return the open streaming response.
+
+    Failures keep their meaning, as Ollama does with `{"error": "..."}` and a
+    real status: a server that can't be reached (loading, stopped) is 503, an
+    upstream rejection keeps its status and message.
+    """
+    client = get_client()
+    request = client.build_request("POST", f"{srv.url}{path}", json=payload, timeout=_TIMEOUT)
+    try:
+        resp = await client.send(request, stream=True)
+    except httpx.ConnectError:
+        raise HTTPException(status_code=503, detail={"error": "model server unreachable (loading or stopped)"})
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail={"error": "upstream timeout"})
+    if resp.status_code != 200:
+        try:
+            message = _upstream_message(await resp.aread())
+        finally:
+            await resp.aclose()
+        raise HTTPException(status_code=resp.status_code, detail={"error": message})
+    return resp
+
+
 def _done_reason(finish_reason: str | None) -> str:
     return {"tool_calls": "tool_calls", "length": "length"}.get(finish_reason or "", "stop")
 
@@ -309,7 +398,7 @@ async def _sse_events(resp: httpx.Response) -> AsyncIterator[dict[str, Any]]:
             continue
 
 
-async def _stream_chat(model: str, resp: httpx.Response) -> AsyncIterator[str]:
+async def _stream_chat(model: str, resp: httpx.Response, started: float) -> AsyncIterator[str]:
     """Translate OpenAI SSE stream → Ollama NDJSON stream.
 
     Content deltas stream through; tool-call fragments are accumulated and
@@ -319,12 +408,15 @@ async def _stream_chat(model: str, resp: httpx.Response) -> AsyncIterator[str]:
     pending_calls: dict[int, dict[str, Any]] = {}
     finish: str | None = None
     usage: dict[str, Any] = {}
+    timings: dict[str, Any] = {}
 
     async for data in _sse_events(resp):
         # llama-server emits a final chunk with empty choices + usage when
         # stream_options.include_usage is set.
         if data.get("usage"):
             usage = data["usage"]
+        if isinstance(data.get("timings"), dict):
+            timings = data["timings"]
         choice = data.get("choices", [{}])[0] if data.get("choices") else {}
         finish = choice.get("finish_reason") or finish
         delta = choice.get("delta", {})
@@ -377,11 +469,16 @@ async def _stream_chat(model: str, resp: httpx.Response) -> AsyncIterator[str]:
         "message": {"role": "assistant", "content": ""},
         "done": True,
         "done_reason": _done_reason(finish),
+        **_durations(started, timings),
+        "prompt_eval_count": usage.get("prompt_tokens", 0),
+        "eval_count": usage.get("completion_tokens", 0),
     }
-    if usage:
-        done["prompt_eval_count"] = usage.get("prompt_tokens", 0)
-        done["eval_count"] = usage.get("completion_tokens", 0)
     yield json.dumps(done) + "\n"
+
+
+_REPLAY_EXTENSION_FIELDS = (
+    "preserve_reasoning", "preserve_thinking", "clear_thinking", "reasoning", "chat_template_kwargs",
+)
 
 
 @router.post("/api/chat", response_model=None)
@@ -406,38 +503,34 @@ async def chat(req: OllamaChatRequest) -> StreamingResponse | JSONResponse:
     if req.stream:
         client_opts = body.get("stream_options") or {}
         payload["stream_options"] = {"include_usage": True, **client_opts}
+    # metallama extension (not part of Ollama's API): the same replay controls
+    # as /openai, read from the request's extra top-level fields.
+    for key in _REPLAY_EXTENSION_FIELDS:
+        if key in body:
+            payload[key] = body[key]
+    # Before the effort step, which consumes `reasoning`.
+    apply_replay(payload)
     _apply_reasoning_effort(payload, srv, req.model, body)
+
+    started = time.monotonic()
+    resp = await _open(srv, "/v1/chat/completions", payload)
 
     if req.stream:
         async def generate() -> AsyncIterator[bytes]:
             try:
-                async with shared_client() as client:
-                    async with client.stream("POST", f"{srv.url}/v1/chat/completions", json=payload, timeout=_TIMEOUT) as resp:
-                        if resp.status_code != 200:
-                            body = await resp.aread()
-                            yield (json.dumps({"error": f"upstream error: {body.decode(errors='replace')[:300]}"}) + "\n").encode()
-                            return
-                        async for chunk in _stream_chat(req.model, resp):
-                            yield chunk.encode()
-            except httpx.ConnectError:
-                yield (json.dumps({"error": "upstream unreachable"}) + "\n").encode()
-            except httpx.TimeoutException:
-                yield (json.dumps({"error": "upstream timeout"}) + "\n").encode()
+                async for chunk in _stream_chat(req.model, resp, started):
+                    yield chunk.encode()
+            except (httpx.TransportError, httpx.TimeoutException):
+                yield (json.dumps({"error": "upstream connection lost"}) + "\n").encode()
+            finally:
+                await resp.aclose()
 
         return StreamingResponse(generate(), media_type="application/x-ndjson")
 
     try:
-        async with shared_client() as client:
-            resp = await client.post(f"{srv.url}/v1/chat/completions", json=payload, timeout=_TIMEOUT)
-    except httpx.ConnectError:
-        raise HTTPException(status_code=502, detail={"error": "upstream unreachable"})
-    except httpx.TimeoutException:
-        raise HTTPException(status_code=502, detail={"error": "upstream timeout"})
-
-    if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail={"error": f"upstream error: {resp.text[:300]}"})
-
-    data = resp.json()
+        data = json.loads(await resp.aread())
+    finally:
+        await resp.aclose()
     choice = data.get("choices", [{}])[0]
     message = choice.get("message", {})
     out_message: dict[str, Any] = {"role": "assistant", "content": message.get("content") or ""}
@@ -454,20 +547,25 @@ async def chat(req: OllamaChatRequest) -> StreamingResponse | JSONResponse:
         "message": out_message,
         "done": True,
         "done_reason": _done_reason(choice.get("finish_reason")),
+        **_durations(started, data.get("timings") or {}),
         "prompt_eval_count": usage.get("prompt_tokens", 0),
         "eval_count": usage.get("completion_tokens", 0),
     })
 
 
-# ---------------------------------------------------------------------------
-# POST /api/generate
-# ---------------------------------------------------------------------------
-
-
-async def _stream_generate(model: str, resp: httpx.Response) -> AsyncIterator[str]:
+async def _stream_generate(model: str, resp: httpx.Response, started: float) -> AsyncIterator[str]:
     """Translate OpenAI SSE stream → Ollama generate NDJSON stream."""
+    finish: str | None = None
+    usage: dict[str, Any] = {}
+    timings: dict[str, Any] = {}
     async for data in _sse_events(resp):
-        text = data.get("choices", [{}])[0].get("text", "")
+        if data.get("usage"):
+            usage = data["usage"]
+        if isinstance(data.get("timings"), dict):
+            timings = data["timings"]
+        choice = data.get("choices", [{}])[0] if data.get("choices") else {}
+        finish = choice.get("finish_reason") or finish
+        text = choice.get("text", "")
         if text:
             yield json.dumps({
                 "model": model,
@@ -475,55 +573,60 @@ async def _stream_generate(model: str, resp: httpx.Response) -> AsyncIterator[st
                 "response": text,
                 "done": False,
             }) + "\n"
-    yield json.dumps({"model": model, "created_at": _now(), "response": "", "done": True}) + "\n"
+    yield json.dumps({
+        "model": model,
+        "created_at": _now(),
+        "response": "",
+        "done": True,
+        "done_reason": _done_reason(finish),
+        **_durations(started, timings),
+        "prompt_eval_count": usage.get("prompt_tokens", 0),
+        "eval_count": usage.get("completion_tokens", 0),
+    }) + "\n"
 
 
 @router.post("/api/generate", response_model=None)
 async def generate_endpoint(req: OllamaGenerateRequest) -> StreamingResponse | JSONResponse:
     srv = get_subserver(req.model)
     base_model, _ = split_virtual_model(req.model)
-    payload = {
+    payload: dict[str, Any] = {
         "model": base_model,
         "prompt": req.prompt,
         "stream": req.stream,
         **_translate_options(req.options),
     }
+    if req.stream:
+        payload["stream_options"] = {"include_usage": True}
+    started = time.monotonic()
+    resp = await _open(srv, "/v1/completions", payload)
 
     if req.stream:
         async def generate() -> AsyncIterator[bytes]:
             try:
-                async with shared_client() as client:
-                    async with client.stream("POST", f"{srv.url}/v1/completions", json=payload, timeout=_TIMEOUT) as resp:
-                        if resp.status_code != 200:
-                            yield (json.dumps({"error": "upstream error"}) + "\n").encode()
-                            return
-                        async for chunk in _stream_generate(req.model, resp):
-                            yield chunk.encode()
-            except httpx.ConnectError:
-                yield (json.dumps({"error": "upstream unreachable"}) + "\n").encode()
-            except httpx.TimeoutException:
-                yield (json.dumps({"error": "upstream timeout"}) + "\n").encode()
+                async for chunk in _stream_generate(req.model, resp, started):
+                    yield chunk.encode()
+            except (httpx.TransportError, httpx.TimeoutException):
+                yield (json.dumps({"error": "upstream connection lost"}) + "\n").encode()
+            finally:
+                await resp.aclose()
 
         return StreamingResponse(generate(), media_type="application/x-ndjson")
 
     try:
-        async with shared_client() as client:
-            resp = await client.post(f"{srv.url}/v1/completions", json=payload, timeout=_TIMEOUT)
-    except httpx.ConnectError:
-        raise HTTPException(status_code=502, detail={"error": "upstream unreachable"})
-    except httpx.TimeoutException:
-        raise HTTPException(status_code=502, detail={"error": "upstream timeout"})
-
-    if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail={"error": "upstream error"})
-
-    data = resp.json()
-    text = data.get("choices", [{}])[0].get("text", "")
+        data = json.loads(await resp.aread())
+    finally:
+        await resp.aclose()
+    choice = data.get("choices", [{}])[0]
+    usage = data.get("usage", {})
     return JSONResponse({
         "model": req.model,
         "created_at": _now(),
-        "response": text,
+        "response": choice.get("text", ""),
         "done": True,
+        "done_reason": _done_reason(choice.get("finish_reason")),
+        **_durations(started, data.get("timings") or {}),
+        "prompt_eval_count": usage.get("prompt_tokens", 0),
+        "eval_count": usage.get("completion_tokens", 0),
     })
 
 

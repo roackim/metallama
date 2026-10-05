@@ -6,9 +6,10 @@ from .schemas import AppConfig, SubserverConfig
 
 _registry: dict[str, SubserverConfig] = {}
 
-# Every reasoning-effort value the gateway understands, by increasing effort.
+# Every reasoning-effort value the gateway understands, by increasing effort:
+# the union of llama.cpp, OpenRouter, Ollama (`think`) and DeepSeek vocabularies.
 # "none" disables thinking (llama-server maps it to enable_thinking=false).
-REASONING_EFFORTS = ("none", "low", "medium", "high", "xhigh")
+REASONING_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 
 
 def split_virtual_model(model_name: str) -> tuple[str, str | None]:

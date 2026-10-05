@@ -18,11 +18,10 @@ from typing import Any, AsyncIterator
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse, Response, StreamingResponse
-from starlette.background import BackgroundTask
+from fastapi.responses import JSONResponse, Response
 
 from ..registry import effective_reasoning_efforts, virtual_efforts
-from .openai import _openai_error, _reasoning_fields, healthy_subservers, open_upstream
+from .openai import _openai_error, _reasoning_fields, healthy_subservers, prepare_upstream, respond
 
 router = APIRouter()
 
@@ -64,6 +63,7 @@ def _model_entry(model_id: str, srv: Any) -> dict[str, Any]:
         },
         "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
         "top_provider": {"context_length": srv.context_length, "is_moderated": False},
+        "links": {"details": f"/api/v1/models/{model_id}/endpoints"},
         "supported_parameters": sorted(
             _SUPPORTED_PARAMETERS + reasoning.get("supported_parameters", [])
         ),
@@ -135,32 +135,23 @@ async def _translate_stream(resp: httpx.Response, keep: bool) -> AsyncIterator[b
 
 @router.post("/v1/chat/completions", response_model=None)
 async def chat_completions(request: Request) -> Response:
+    keep: list[bool] = []
+
+    def prepare(body: dict[str, Any]) -> None:
+        keep.append(_wants_reasoning(body))
+        _prepare(body)
+
     try:
-        keep: list[bool] = []
-        def prepare(body: dict[str, Any]) -> None:
-            keep.append(_wants_reasoning(body))
-            _prepare(body)
-        body, resp = await open_upstream(
-            request, "/v1/chat/completions", apply_effort=True, prepare=prepare
+        prepared = await prepare_upstream(
+            request, "/v1/chat/completions", apply_effort=True, prepare=prepare, usage=True
         )
+        keep_reasoning = keep[0]
+        resp = await respond(prepared, wrap=lambda r: _translate_stream(r, keep_reasoning))
     except HTTPException as exc:
         return _openai_error(exc)
-    keep_reasoning = keep[0]
-
-    if body.get("stream") and resp.status_code == 200:
-        return StreamingResponse(
-            _translate_stream(resp, keep_reasoning),
-            media_type="text/event-stream",
-            background=BackgroundTask(resp.aclose),
-        )
-    try:
-        content = await resp.aread()
-    finally:
-        await resp.aclose()
-    media_type = resp.headers.get("content-type", "application/json")
-    if resp.status_code != 200:
-        return Response(content=content, status_code=resp.status_code, media_type=media_type)
-    data = json.loads(content)
+    if prepared.body.get("stream") or resp.status_code != 200:
+        return resp
+    data = json.loads(resp.body)
     for choice in data.get("choices") or []:
         if isinstance(choice.get("message"), dict):
             _rename_reasoning(choice["message"], keep_reasoning)
