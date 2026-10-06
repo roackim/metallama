@@ -30,6 +30,7 @@ from .gateway.openrouter import router as openrouter_router
 from .gateway.llamacpp import router as llamacpp_router
 from .profiles import MODEL_PROFILES
 from .runtime import (
+    adopt_running_servers,
     binary_health,
     build_command,
     build_command_preview,
@@ -934,6 +935,9 @@ async def startup_tasks() -> None:
     _log = logging.getLogger(__name__)
 
     await probe_subservers()
+
+    for name in adopt_running_servers():
+        _log.info("Adopted running server: %s", name)
 
     # Auto-start servers flagged with auto_start: true in config.
     from .unified_config import load_unified_config

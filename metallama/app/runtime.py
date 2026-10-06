@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import socket
 import subprocess
+import time
 
 import httpx
+import psutil
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -73,6 +75,73 @@ def get_profile_with_config(profile: ModelProfile) -> ModelProfile:
 
     return replace(profile, **overrides) if overrides else profile
 
+
+
+class AdoptedProcess:
+    """Popen-shaped handle on a server this app didn't spawn (started by a previous run).
+
+    Covers what the runtime needs: pid, poll, wait, terminate, kill, send_signal.
+    """
+
+    def __init__(self, proc: psutil.Process) -> None:
+        self._proc = proc
+        self.pid = proc.pid
+
+    def poll(self) -> int | None:
+        try:
+            alive = self._proc.is_running() and self._proc.status() != psutil.STATUS_ZOMBIE
+        except psutil.Error:
+            alive = False
+        return None if alive else 0
+
+    def wait(self, timeout: float | None = None) -> int:
+        try:
+            self._proc.wait(timeout)
+        except psutil.TimeoutExpired as exc:
+            raise subprocess.TimeoutExpired(self._proc.cmdline(), timeout or 0) from exc
+        except psutil.Error:
+            pass
+        return 0
+
+    def send_signal(self, sig: int) -> None:
+        try:
+            self._proc.send_signal(sig)
+        except psutil.NoSuchProcess:
+            pass
+
+    def terminate(self) -> None:
+        self.send_signal(15)
+
+    def kill(self) -> None:
+        self.send_signal(9)
+
+
+def adopt_running_servers() -> list[str]:
+    """Re-register llama-servers that outlived a restart of this app.
+
+    The process table lives in memory, so a restart (or a dev reload) forgets
+    servers it started. A process is adopted only when its command line carries
+    both the profile's model path and `--port <profile.port>`.
+    Returns the adopted model names.
+    """
+    adopted: list[str] = []
+    wanted = {
+        name: (str(profile.model_path), str(profile.port))
+        for name, profile in MODEL_PROFILES.items()
+        if profile.model_path and name not in runtime_processes
+    }
+    if not wanted:
+        return adopted
+    for proc in psutil.process_iter(["cmdline", "create_time"]):
+        cmd = proc.info.get("cmdline") or []
+        for name, (model_path, port) in list(wanted.items()):
+            if model_path in cmd and any(a == "--port" and b == port for a, b in zip(cmd, cmd[1:])):
+                runtime_processes[name] = ProcessState(
+                    process=AdoptedProcess(proc), started_at=proc.info.get("create_time") or time.time(), command=cmd,
+                )
+                del wanted[name]
+                adopted.append(name)
+    return adopted
 
 
 def is_alive(proc: subprocess.Popen[str]) -> bool:
