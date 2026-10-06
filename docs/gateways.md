@@ -40,11 +40,11 @@ plus shared `registry.py`, `probe.py`, `proxy.py`, `reasoning.py`).
 | **Load / unload models** | ⚠️ empty request is acknowledged, nothing started/stopped | ❌ | ✅ `/models/load`, `/models/unload` (admin, managed only) |
 | **Native endpoints** (`tokenize`, `props`, `slots`, `infill`, `metrics`…) | ❌ | ❌ | ✅ |
 | **Error shape** | `{"error": "..."}` | llama-server's errors ² | llama-server's `{"error": {code, message, type}}` |
-| **Not supported** | `pull`, `push`, `copy`, `delete`, `create` | — | auto-loading a stopped model ³ |
+| **Not supported** | `pull`, `push`, `copy`, `delete`, `create` | — | auto-loading a stopped model (by design) ³ |
 
 1. Embeddings require the backing server to be started with `--embeddings`.
 2. Unknown model on `/openai` returns an OpenAI-style `{"error": {...}}` (404).
-3. Requests to a stopped model return `503` (`model server unreachable`); start it with `/models/load` or from the UI.
+3. By design, a request never starts a stopped model: it returns `503` (`model server unreachable`). Start it with `/models/load` or from the UI.
 
 ---
 
