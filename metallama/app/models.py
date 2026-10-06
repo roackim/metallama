@@ -18,6 +18,7 @@ class ModelProfile:
     model_draft: str | Path | None = None
     mmproj: str | Path | None = None
     reasoning_efforts: list[str] = dataclasses.field(default_factory=list)
+    virtualize_efforts: bool = False
 
 
 @dataclass

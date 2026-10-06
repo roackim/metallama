@@ -6,6 +6,7 @@ Feature-scoped frontend modules, each responsible for one UI section.
 
 | Directory | Purpose |
 |-----------|---------|
+| `chat/` | Standalone `/chat` page: conversations, streaming chat, reasoning display, image attachments |
 | `hf/` | HuggingFace browser: search, file listing, download with progress |
 | `models/` | Model cards: status display, start/stop buttons, config editing, local/remote badges |
 | `system/` | System monitoring: VRAM/RAM gauges, history graphs |
@@ -24,6 +25,12 @@ Feature-scoped frontend modules, each responsible for one UI section.
 | `refreshVramGraph()` | system/ | Renders VRAM history chart |
 | `refreshRamGraph()` | system/ | Renders RAM history chart |
 | `setupThemeSwitcher()` | theme/ | Initializes theme buttons, reads/writes `localStorage` |
+| `initChat()` | chat/ | Boots the `/chat` page: loads conversations/models, wires streaming + image attach |
+| `_streamAssistantReply()` | chat/ | Streams an assistant reply (hydrating image refs to data URLs) and persists it |
+| `modelSupportsVision()` | chat/ | Reads `capabilities` from `/ollama/api/tags` to gate image attachments |
+| `addPendingImages()` / `processImageFile()` | chat/ | Downscale (1024px) + re-encode attachments, store blobs, render the preview strip |
+| `buildMessageImage()` / `openLightbox()` | chat/ | Renders stored images in user messages and a click-to-enlarge viewer |
+| `putImage()` / `getImage()` / `gcImages()` | chat/imageStore.js | Content-addressed IndexedDB blob store (SHA-256 keys, orphan GC, memory fallback) |
 
 ## See Also
 - [JS entry point](./app-static-js.md)

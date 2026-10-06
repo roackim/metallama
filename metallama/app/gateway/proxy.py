@@ -37,7 +37,8 @@ async def proxy(
     try:
         resp = await client.send(request, stream=True)
     except httpx.ConnectError:
-        return JSONResponse({"error": "upstream unreachable"}, status_code=502)
+        # Clients retry 503 with backoff (a model that is loading or restarting).
+        return JSONResponse({"error": "model server unreachable (loading or stopped)"}, status_code=503)
     except httpx.TimeoutException:
         return JSONResponse({"error": "upstream timeout"}, status_code=504)
 

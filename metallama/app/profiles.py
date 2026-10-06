@@ -20,6 +20,7 @@ def _build_profiles() -> dict[str, ModelProfile]:
             model_draft=server.model_draft,
             mmproj=server.mmproj,
             reasoning_efforts=server.reasoning_efforts,
+            virtualize_efforts=server.virtualize_efforts,
         )
     return profiles
 

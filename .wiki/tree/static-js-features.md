@@ -6,6 +6,8 @@ One ES module per UI feature. Each exports a `setup*` function called from `main
 
 | File | Purpose |
 |------|---------|
+| `chat/index.js` | Standalone `/chat` page: conversations, streaming, reasoning, image attachments |
+| `chat/imageStore.js` | Content-addressed IndexedDB blob store for chat images (SHA-256 keys, orphan GC, memory fallback) |
 | `models/index.js` | Model cards: compact metadata/actions layout, start/stop, logs, slots, edit/create modal, filters |
 | `hf/index.js` | HuggingFace search panel + download orchestration |
 | `library/index.js` | Local model library: inventory, partial downloads, compact Serve/Rename/Delete action groups |
@@ -26,6 +28,9 @@ One ES module per UI feature. Each exports a `setup*` function called from `main
 | `refreshVramGraph()` / `refreshRamGraph()` | system/index.js | Draw history graphs on canvas (aggregate + per-GPU) |
 | `renderGpuList()` | system/index.js | Renders per-GPU toggle rows (tracked first, untracked dimmed at bottom with graph hidden) |
 | `setupThemeSwitcher()` | theme/index.js | Applies and persists theme preference |
+| `_streamAssistantReply()` | chat/index.js | Streams an assistant reply; renders reasoning (`message.thinking`, falling back to `message.reasoning`) live in a dedicated collapsible "Thoughts" message above the answer and persists it (with a `reasoning_secs` duration) |
+| `buildThoughtsMessage()` | chat/index.js | Builds the dedicated collapsible "Thoughts" chat message (`.chat-msg.thoughts`, a single `<details>`) whose summary reads "Thought for Xs"; body renders as Markdown |
+| `updateThoughtsBody()` | chat/index.js | Re-renders a thoughts message's body as Markdown while streaming |
 
 ## See Also
 - [Frontend overview](../notes/frontend.md)

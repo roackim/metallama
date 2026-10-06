@@ -1,128 +1,68 @@
-"""Reasoning controls shared by every gateway surface (Ollama, OpenAI, llama.cpp).
+"""Reasoning effort, applied the way llama-server's chat templates read it.
 
-llama-server ignores a top-level `reasoning_effort`; the chat template only sees
-values passed through `chat_template_kwargs`. Likewise, the template only renders
-past thinking from `message.reasoning_content`, while clients variously send it
-back as `reasoning`, `thinking` or `reasoning_details`. This module normalizes
-both before a request goes upstream.
+Which effort a request asks for (and whether the server allows it) is decided by
+`registry.resolve_reasoning_effort`. This module turns that decision into the
+upstream payload: llama-server ignores a top-level `reasoning_effort` (and maps
+nothing to `enable_thinking`), so the effort goes into `chat_template_kwargs`,
+the only place templates read it from. Past reasoning in the history is handled
+separately by `replay`.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from .registry import split_virtual_model
+from .registry import resolve_reasoning_effort
+from .replay import apply_replay
+from .schemas import SubserverConfig
 
-# Effort → (template reasoning_effort, reasoning_budget). high = unrestricted (-1).
-# Templates such as Qwen 3.x accept low / medium / high / xhigh.
-_REASONING_EFFORT_MAP: dict[str, tuple[str, int]] = {
-    "minimal": ("low", 1024),
-    "low": ("low", 1024),
-    "medium": ("medium", 4096),
-    "high": ("high", -1),
-    "xhigh": ("xhigh", -1),
-}
-
-# Values that disable thinking. Passing "none" as reasoning_effort makes some
-# templates raise, so these map to enable_thinking=false instead.
-_DISABLED_EFFORTS = {"none", "0", "false", "off"}
-
-# Alternate names clients use for an assistant message's thinking.
-_REASONING_ALIASES = ("reasoning", "thinking")
+# Request fields that select an effort; consumed here, never sent upstream.
+_EFFORT_FIELDS = ("think", "reasoning", "reasoning_effort")
 
 
-def _extract_reasoning_effort(body: dict[str, Any]) -> str | None:
-    """Pull a reasoning effort from the request body.
+def _template_effort(effort: str, supported: list[str]) -> str:
+    """The value to hand the template for a requested effort.
 
-    Sources, in priority order:
-    - top-level `reasoning_effort` (OpenAI chat completions)
-    - `reasoning.effort` (OpenAI Responses / OpenRouter)
-    - `options.reasoning_effort`
-    - `think` (Ollama: bool or "low"/"medium"/"high")
+    `minimal` and `max` are vocabulary of other APIs (OpenRouter, Ollama); when
+    the template doesn't know them, use its lowest / highest supported level
+    instead of letting the template reject the request.
     """
-    top = body.get("reasoning_effort")
-    if top is not None:
-        return str(top).lower()
-    reasoning = body.get("reasoning")
-    if isinstance(reasoning, dict) and reasoning.get("effort") is not None:
-        return str(reasoning["effort"]).lower()
-    options = body.get("options")
-    if isinstance(options, dict) and options.get("reasoning_effort") is not None:
-        return str(options["reasoning_effort"]).lower()
-    think = body.get("think")
-    if think is False:
-        return "none"
-    if isinstance(think, str):
-        return think.lower()
-    return None
+    levels = [e for e in supported if e != "none"]
+    if effort in supported or not levels:
+        return effort
+    if effort == "minimal":
+        return levels[0]
+    if effort == "max":
+        return levels[-1]
+    return effort
 
 
-def _extract_preserve_thinking(body: dict[str, Any]) -> bool | None:
-    """Pull a `preserve_thinking` flag from the top level or `options`."""
-    val = body.get("preserve_thinking")
-    if val is None:
-        options = body.get("options")
-        if isinstance(options, dict):
-            val = options.get("preserve_thinking")
-    return None if val is None else bool(val)
+def apply_effort(payload: dict[str, Any], srv: SubserverConfig, model_name: str, body: dict[str, Any]) -> None:
+    """Resolve the request's effort (400 if not allowed) and set it on `payload`.
 
-
-def _apply_reasoning_effort(payload: dict[str, Any], body: dict[str, Any], model_name: str | None = None) -> None:
-    """Map a client reasoning effort onto the llama-server payload.
-
-    The virtual model suffix (e.g. "name:high") wins over any body value.
-    Sets `reasoning_budget` and `chat_template_kwargs` (the only place the
-    template reads the effort from).
+    `body` is what the client sent (it may differ from `payload`, e.g. Ollama's
+    request vs the translated chat payload). With no effort requested, the
+    template's default applies.
     """
-    raw = None
-    if model_name:
-        _, raw = split_virtual_model(model_name)
-    if raw is None:
-        raw = _extract_reasoning_effort(body)
-    if raw is None:
+    effort = resolve_reasoning_effort(srv, model_name, body)
+    for field in _EFFORT_FIELDS:
+        payload.pop(field, None)
+    if effort is None:
         return
-    kwargs = dict(payload.get("chat_template_kwargs") or {})
-    payload.pop("reasoning_effort", None)
-    if raw in _DISABLED_EFFORTS:
+    kwargs = payload.get("chat_template_kwargs")
+    kwargs = dict(kwargs) if isinstance(kwargs, dict) else {}
+    if effort == "none":
         kwargs.pop("reasoning_effort", None)
         kwargs["enable_thinking"] = False
-        payload["reasoning_budget"] = 0
     else:
-        # Unknown values pass through so templates can accept model-specific efforts.
-        effort, budget = _REASONING_EFFORT_MAP.get(raw, (raw, -1))
-        kwargs["reasoning_effort"] = effort
-        payload["reasoning_budget"] = budget
+        kwargs["reasoning_effort"] = _template_effort(effort, srv.supported_reasoning_efforts)
     payload["chat_template_kwargs"] = kwargs
 
 
-def _normalize_message_reasoning(message: dict[str, Any]) -> None:
-    """Move an assistant message's thinking into `reasoning_content`."""
-    if message.get("role") != "assistant":
-        return
-    aliases = {k: message.pop(k) for k in _REASONING_ALIASES if k in message}
-    details = message.pop("reasoning_details", None)
-    if isinstance(message.get("reasoning_content"), str):
-        return
-    for value in aliases.values():
-        if isinstance(value, str) and value:
-            message["reasoning_content"] = value
-            return
-    if isinstance(details, list):
-        text = "".join(d.get("text", "") for d in details if isinstance(d, dict))
-        if text:
-            message["reasoning_content"] = text
+def apply_reasoning(payload: dict[str, Any], srv: SubserverConfig, model_name: str, body: dict[str, Any]) -> None:
+    """Chat payloads: replay the history's reasoning, then apply the effort.
 
-
-def apply_reasoning(payload: dict[str, Any], body: dict[str, Any], model_name: str | None = None) -> None:
-    """Normalize effort, preserve_thinking and past thinking for a chat payload."""
-    _apply_reasoning_effort(payload, body, model_name)
-    payload.pop("reasoning", None)
-    preserve = _extract_preserve_thinking(body)
-    payload.pop("preserve_thinking", None)
-    if preserve is not None:
-        kwargs = dict(payload.get("chat_template_kwargs") or {})
-        kwargs["preserve_thinking"] = preserve
-        payload["chat_template_kwargs"] = kwargs
-    for message in payload.get("messages") or []:
-        if isinstance(message, dict):
-            _normalize_message_reasoning(message)
+    Replay runs first: it reads `reasoning.context`, which the effort step consumes.
+    """
+    apply_replay(payload)
+    apply_effort(payload, srv, model_name, body)

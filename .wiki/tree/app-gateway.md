@@ -1,7 +1,7 @@
 # metallama/app/gateway
 
 Client-facing gateways in front of the llama.cpp servers: Ollama (`/ollama`), OpenAI
-(`/openai/v1`, alias `/ollama/v1`) and native llama.cpp in router-mode shape (`/llamacpp`).
+(`/openai/v1`, alias `/ollama/v1`), OpenRouter (`/openrouter/v1`) and native llama.cpp in router-mode shape (`/llamacpp`).
 Shared registry, lazy probing, streaming proxy and reasoning normalization live alongside.
 
 ## Files
@@ -15,7 +15,9 @@ Shared registry, lazy probing, streaming proxy and reasoning normalization live 
 | `probe.py` | Async probing of upstream servers: fetches `/props` and `/v1/models` to backfill metadata |
 | `config.yaml` | Legacy YAML config listing subservers — now loaded from unified `config.yaml` |
 | `proxy.py` | Streams an upstream response back verbatim (status + content type preserved) |
-| `reasoning.py` | Effort / `preserve_thinking` → `chat_template_kwargs`; past thinking → `reasoning_content` |
+| `reasoning.py` | Resolved effort → `chat_template_kwargs` (`reasoning_effort` / `enable_thinking=false`) |
+| `replay.py` | History reasoning → `reasoning_content`; `preserve_reasoning` (chat + Responses) |
+| `openrouter.py` | OpenRouter-flavoured routes, mounted at `/openrouter` (built on `openai.py`) |
 | `ollama.py` | Ollama API routes, mounted at `/ollama` |
 | `openai.py` | OpenAI-compatible routes, mounted at `/openai` (and `/ollama` as a hidden alias) |
 | `llamacpp.py` | Native llama.cpp API at `/llamacpp`, router-mode shape (routes by `model`) |
@@ -50,7 +52,7 @@ Shared registry, lazy probing, streaming proxy and reasoning normalization live 
 | `_ollama_message_to_openai()` | ollama.py | Converts an Ollama chat message to OpenAI shape (tool calls + base64 images → multimodal content parts) |
 | `_openai_tool_calls_to_ollama()` | ollama.py | Converts OpenAI tool_calls back to Ollama shape |
 | `root()` | ollama.py | `GET /ollama` — "Ollama is running" health ping |
-| `apply_reasoning()` | reasoning.py | Maps effort / `preserve_thinking` into `chat_template_kwargs` and normalizes past thinking to `reasoning_content` |
+| `apply_reasoning()` | reasoning.py | Replay (`replay.apply_replay`), then the resolved effort into `chat_template_kwargs` |
 | `proxy()` | proxy.py | Streams an upstream response back verbatim (status + content type preserved) |
 | `passthrough()` | llamacpp.py | `/{path}` — picks the server from body `model` / `?model=` and forwards |
 | `list_models()` / `load_model()` / `unload_model()` | llamacpp.py | Router-mode `/models`, `/models/load`, `/models/unload` |

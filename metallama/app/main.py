@@ -11,11 +11,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request
-from fastapi.exception_handlers import http_exception_handler as default_http_exception_handler
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi import Body, Depends, FastAPI, Header, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .auth import admin_guard, auth_enabled, check_password, create_session, revoke_session
 from .config import STATIC_DIR, Config
@@ -28,6 +26,7 @@ from .gateway.probe import probe_subservers
 from .gateway.registry import rebuild_registry as rebuild_gateway_registry
 from .gateway.ollama import router as ollama_router
 from .gateway.openai import router as openai_router
+from .gateway.openrouter import router as openrouter_router
 from .gateway.llamacpp import router as llamacpp_router
 from .profiles import MODEL_PROFILES
 from .runtime import (
@@ -84,26 +83,16 @@ app = FastAPI(title="metallama", lifespan=lifespan)
 app.mount("/static", NoCacheStaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # ---------------------------------------------------------------------------
-# Gateways: Ollama (/ollama), OpenAI (/openai/v1), native llama.cpp (/llamacpp).
-# /ollama/v1 is kept as a hidden alias of the OpenAI gateway for older clients.
+# Gateways: Ollama (/ollama), OpenAI (/openai/v1), OpenRouter-flavoured (/openrouter),
+# native llama.cpp (/llamacpp). /ollama/v1 is a hidden alias of the OpenAI gateway.
 # ---------------------------------------------------------------------------
 
 rebuild_gateway_registry()
 app.include_router(ollama_router, prefix="/ollama")
 app.include_router(openai_router, prefix="/openai")
 app.include_router(openai_router, prefix="/ollama", include_in_schema=False)
+app.include_router(openrouter_router, prefix="/openrouter")
 app.include_router(llamacpp_router, prefix="/llamacpp")
-
-
-@app.exception_handler(StarletteHTTPException)
-async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> Response:
-    """Ollama clients read errors from a top-level `error` string."""
-    if request.url.path.startswith("/ollama/api/"):
-        detail = exc.detail
-        message = detail.get("error", str(detail)) if isinstance(detail, dict) else str(detail)
-        return JSONResponse({"error": message}, status_code=exc.status_code, headers=exc.headers)
-    return await default_http_exception_handler(request, exc)
-
 app.include_router(hf_router)
 
 # Server-side history storage (500 samples at 1s = ~8 minutes)
@@ -166,6 +155,11 @@ def _iso_mtime(st: os.stat_result) -> str | None:
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(str(STATIC_DIR / "index.html"))
+
+
+@app.get("/chat", include_in_schema=False)
+def chat_page() -> FileResponse:
+    return FileResponse(str(STATIC_DIR / "chat.html"))
 
 
 @app.get("/api/health")
@@ -1186,6 +1180,11 @@ async def update_model_config(model_name: str, payload: dict[str, Any] = Body(..
         if not isinstance(efforts, list) or not all(isinstance(e, str) for e in efforts):
             raise HTTPException(status_code=400, detail="reasoning_efforts must be a list of strings")
         updates["reasoning_efforts"] = [e.strip().lower() for e in efforts if e.strip()]
+
+    if "virtualize_efforts" in payload:
+        if not isinstance(payload["virtualize_efforts"], bool):
+            raise HTTPException(status_code=400, detail="virtualize_efforts must be a boolean")
+        updates["virtualize_efforts"] = payload["virtualize_efforts"]
 
     if updates:
         # Update config.yaml (machine-managed section)

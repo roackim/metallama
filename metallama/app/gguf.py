@@ -93,6 +93,52 @@ def read_metadata(path: str | Path) -> dict[str, Any] | None:
     return meta
 
 
+# (path, mtime, size) -> chat template (bounded LRU cache)
+_TEMPLATE_CACHE: OrderedDict[tuple[str, float, int], str | None] = OrderedDict()
+
+
+def read_chat_template(path: str | Path) -> str | None:
+    """Read the embedded `tokenizer.chat_template` from a GGUF header.
+
+    Skips every other value (the tokenizer vocab arrays are seeked over, not
+    read). Returns None if the file isn't a parseable GGUF or has no template.
+    """
+    p = Path(path)
+    try:
+        stat = p.stat()
+    except OSError:
+        return None
+    cache_key = (str(p), stat.st_mtime, stat.st_size)
+    if cache_key in _TEMPLATE_CACHE:
+        _TEMPLATE_CACHE.move_to_end(cache_key)
+        return _TEMPLATE_CACHE[cache_key]
+
+    template: str | None = None
+    try:
+        with p.open("rb") as f:
+            if f.read(4) != b"GGUF":
+                raise ValueError("not a GGUF file")
+            version = struct.unpack("<I", f.read(4))[0]
+            if version < 2:
+                raise ValueError(f"unsupported GGUF version {version}")
+            f.seek(8, 1)  # tensor_count
+            kv_count = _read_len(f)
+            for _ in range(kv_count):
+                key = f.read(_read_len(f)).decode("utf-8", errors="replace")
+                vtype = struct.unpack("<I", f.read(4))[0]
+                if key == "tokenizer.chat_template" and vtype == _STRING:
+                    template = f.read(_read_len(f)).decode("utf-8", errors="replace")
+                    break
+                _skip_value(f, vtype)
+    except (OSError, ValueError, struct.error):
+        template = None
+
+    while len(_TEMPLATE_CACHE) >= _MAX_CACHE_SIZE:
+        _TEMPLATE_CACHE.popitem(last=False)
+    _TEMPLATE_CACHE[cache_key] = template
+    return template
+
+
 def estimate_vram_gb(
     model_path: str | Path,
     context_tokens: int,

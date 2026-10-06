@@ -1,5 +1,6 @@
 import { api } from "../../core/api.js";
 import { copyToClipboard } from "../../core/clipboard.js";
+import { registerModal } from "../../core/modal.js";
 import { setConfigMessage } from "../../core/uiMessage.js";
 
 const modelsEl = document.getElementById("models");
@@ -233,6 +234,8 @@ function clearModalFields() {
   if (reasoningEnabled) reasoningEnabled.checked = false;
   const reasoningEfforts = document.getElementById("edit-reasoning-efforts");
   if (reasoningEfforts) reasoningEfforts.innerHTML = "";
+  const virtualize = document.getElementById("edit-virtualize-efforts");
+  if (virtualize) virtualize.checked = false;
   const warning = document.getElementById("edit-model-warning");
   if (warning) warning.classList.add("is-hidden");
   const mtpWarning = document.getElementById("edit-model-draft-warning");
@@ -242,17 +245,19 @@ function clearModalFields() {
 }
 
 // Populate the reasoning-effort checkboxes from the model's supported efforts
-// and the currently-enabled set.
-function populateReasoningEfforts(supported, enabled) {
+// and the currently-enabled set, plus the "virtualize models on effort" toggle.
+function populateReasoningEfforts(supported, enabled, virtualized) {
   const container = document.getElementById("edit-reasoning-efforts");
   const master = document.getElementById("edit-reasoning-enabled");
+  const virtualize = document.getElementById("edit-virtualize-efforts");
+  if (virtualize) virtualize.checked = Boolean(virtualized);
   const label = document.getElementById("edit-reasoning-label");
   if (!container || !master) return;
   const enabledSet = new Set(enabled || []);
   const supportedList = Array.isArray(supported) ? supported : [];
   if (label) label.textContent = supportedList.length
-    ? "Expose reasoning-effort models"
-    : "Expose reasoning-effort models (none available)";
+    ? "Allow reasoning efforts"
+    : "Allow reasoning efforts (none detected)";
   container.innerHTML = supportedList
     .map((effort) => `
       <label>
@@ -268,6 +273,7 @@ function populateReasoningEfforts(supported, enabled) {
     container.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
       cb.disabled = !master.checked;
     });
+    if (virtualize) virtualize.disabled = !master.checked;
   };
   master.addEventListener("change", () => {
     if (master.checked) {
@@ -278,6 +284,13 @@ function populateReasoningEfforts(supported, enabled) {
     setDisabled();
   });
   setDisabled();
+}
+
+// Whether allowed efforts are also exposed as virtual "name:effort" models.
+function collectVirtualizeEfforts() {
+  const master = document.getElementById("edit-reasoning-enabled");
+  const virtualize = document.getElementById("edit-virtualize-efforts");
+  return Boolean(master?.checked && virtualize?.checked);
 }
 
 // Read the reasoning-effort checkboxes. Returns [] if the master toggle is off.
@@ -319,7 +332,7 @@ function openEditModal(modelId, isManaged) {
       document.getElementById("edit-context-window").value = data.context_window || "";
       document.getElementById("edit-parallel").value = data.parallel || "";
       document.getElementById("edit-extra-args").value = (data.extra_args || []).join("\n");
-      populateReasoningEfforts(data.supported_reasoning_efforts, data.reasoning_efforts);
+      populateReasoningEfforts(data.supported_reasoning_efforts, data.reasoning_efforts, data.virtualize_efforts);
       // Populate model selector from available .gguf files
       loadModelFiles().then((mdata) => {
         populateModelSelector(mdata.files || [], data.model_path || "");
@@ -376,15 +389,8 @@ export function openCreateForModel(modelPath) {
   openCreateModal("managed", { model_path: modelPath });
 }
 
-// Returns true if `modal` is the front-most visible overlay. Overlays share a
-// z-index and stack by DOM order, so the last visible one in document order is
-// on top. Used to make Escape only affect the modal actually in focus — without
-// this, pressing Escape while two modals are stacked (e.g. edit + restart)
-// closes both at once because each has its own global keydown listener.
-function isTopmostModal(modal) {
-  const visible = [...document.querySelectorAll(".modal-overlay:not(.is-hidden)")];
-  return visible.length > 0 && visible[visible.length - 1] === modal;
-}
+// Backdrop-click and Escape dismissal for the overlays below are wired up via
+// registerModal() (see core/modal.js).
 
 function closeEditModal() {
   document.getElementById("edit-modal").classList.add("is-hidden");
@@ -442,9 +448,10 @@ async function doSaveEditModal(restart) {
         .map((s) => s.trim())
         .filter(Boolean),
       reasoning_efforts: collectReasoningEfforts(),
+      virtualize_efforts: collectVirtualizeEfforts(),
     };
     Object.keys(payload).forEach((key) => {
-      if (key === "extra_args" || key === "name" || key === "model_path" || key === "model_draft" || key === "mmproj" || key === "reasoning_efforts") return;
+      if (key === "extra_args" || key === "name" || key === "model_path" || key === "model_draft" || key === "mmproj" || key === "reasoning_efforts" || key === "virtualize_efforts") return;
       if (isNaN(payload[key])) delete payload[key];
     });
     if (payload.name === "") delete payload.name;
@@ -830,9 +837,15 @@ function cardTemplate(model) {
   const reasoningEfforts = supportedReasoningEfforts
     ? configuredReasoningEfforts.filter((effort) => supportedReasoningEfforts.has(effort))
     : configuredReasoningEfforts;
+  // Virtualized efforts read as their model suffix (":low"), matching the
+  // "name:low" models clients see.
+  const effortPrefix = model.virtualize_efforts ? ":" : "";
   const reasoningEffortBadges = reasoningEfforts
-    .map((effort) => `<span class="reasoning-effort-badge ${escapeHtml(effort.toLowerCase())}">${escapeHtml(effort)}</span>`)
+    .map((effort) => `<span class="reasoning-effort-badge ${escapeHtml(effort.toLowerCase())}">${effortPrefix}${escapeHtml(effort)}</span>`)
     .join("");
+  const reasoningEffortTitle = model.virtualize_efforts
+    ? "Allowed reasoning efforts · also listed as name:effort models"
+    : "Allowed reasoning efforts · per request only";
   const slotsHtml = slotIndicators(model);
   const autoStartChip = isManaged
     ? `<label class="autostart-check admin-only" title="${model.auto_start ? "Auto-start on launch · click to disable" : "Auto-start on launch · currently off — click to enable"}"><input type="checkbox" data-id="${model.id}" data-action="autostart" ${model.auto_start ? "checked" : ""}><span>auto-start</span></label>`
@@ -850,7 +863,7 @@ function cardTemplate(model) {
         <div class="title-wrap">
           <h3>${model.display_name}</h3>
           ${stem ? `<span class="card-model-stem">${escapeHtml(stem)}</span>` : ""}
-          ${reasoningEffortBadges ? `<span class="reasoning-effort-badges">${reasoningEffortBadges}</span>` : ""}
+          ${reasoningEffortBadges ? `<span class="reasoning-effort-badges" title="${reasoningEffortTitle}">${reasoningEffortBadges}</span>` : ""}
         </div>
         <div class="header-badges">
           <span class="locality-badge ${isManaged ? "local" : "remote"}">${isManaged ? "Local" : "Remote"}</span>
@@ -1158,6 +1171,8 @@ export function setupModels() {
   // ── Modal event listeners ──────────────────────────────
   const modal = document.getElementById("edit-modal");
   if (modal) {
+    registerModal(modal, closeEditModal);
+
     modal.addEventListener("click", (event) => {
       const target = event.target;
       if (!(target instanceof HTMLButtonElement)) return;
@@ -1170,26 +1185,13 @@ export function setupModels() {
         deleteModal();
       }
     });
-
-    // Close on overlay click (outside dialog)
-    modal.addEventListener("click", (event) => {
-      if (event.target === modal) {
-        closeEditModal();
-      }
-    });
-
-    // Close on Escape key (only when this is the front-most open modal)
-    document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && !modal.classList.contains("is-hidden") && isTopmostModal(modal)) {
-        event.stopPropagation();
-        closeEditModal();
-      }
-    });
   }
 
   // ── Restart-on-save modal ─────────────────────────────
   const restartModal = document.getElementById("restart-modal");
   if (restartModal) {
+    registerModal(restartModal, closeRestartModal);
+
     restartModal.addEventListener("click", (event) => {
       const target = event.target;
       if (!(target instanceof HTMLButtonElement)) return;
@@ -1201,19 +1203,6 @@ export function setupModels() {
         const restart = selected ? selected.value : "now";
         closeRestartModal();
         doSaveEditModal(restart);
-      }
-    });
-
-    // Close on overlay click (outside dialog)
-    restartModal.addEventListener("click", (event) => {
-      if (event.target === restartModal) closeRestartModal();
-    });
-
-    // Close on Escape key (only when this is the front-most open modal)
-    document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && !restartModal.classList.contains("is-hidden") && isTopmostModal(restartModal)) {
-        event.stopPropagation();
-        closeRestartModal();
       }
     });
   }
@@ -1279,6 +1268,8 @@ export function setupModels() {
   }
 
   if (defaultsModal) {
+    registerModal(defaultsModal, closeDefaultsModal);
+
     defaultsModal.addEventListener("click", async (event) => {
       const target = event.target;
       if (!(target instanceof HTMLButtonElement)) return;
@@ -1298,10 +1289,6 @@ export function setupModels() {
           setConfigMessage(err.message, true);
         }
       }
-    });
-
-    defaultsModal.addEventListener("click", (event) => {
-      if (event.target === defaultsModal) closeDefaultsModal();
     });
   }
 }

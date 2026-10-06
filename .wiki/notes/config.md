@@ -33,6 +33,10 @@ managed_servers:    # Local llama.cpp instances (can also be added via API)
     parallel: 4
     extra_args:
       - --temp 0.85
+    reasoning_efforts:        # efforts a request may use (∩ template-supported); others → 400
+      - low
+      - high
+    virtualize_efforts: true  # also expose "my-model:low" / "my-model:high" (default false)
 
 remote_servers:     # Distant endpoints (hand-edited or added via API)
   - name: "remote-model"

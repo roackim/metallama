@@ -37,8 +37,11 @@ class ManagedServer(BaseModel):
     parallel: int = 1
     extra_args: list[str] = Field(default_factory=list)
     auto_start: bool = False
-    # Reasoning effort levels to expose as virtual models (e.g. ["low", "high"]).
+    # Reasoning effort levels a request may use (e.g. ["low", "high"]).
     reasoning_efforts: list[str] = Field(default_factory=list)
+    # Also expose each allowed effort as a virtual "name:effort" model, for
+    # clients that can't send an effort parameter.
+    virtualize_efforts: bool = False
 
     @property
     def effective_display_name(self) -> str:
@@ -334,6 +337,8 @@ def save_unified_config(config: UnifiedConfig, path: str | Path | None = None) -
                 lines.append("    reasoning_efforts:")
                 for effort in server.reasoning_efforts:
                     lines.append(f"      - {effort}")
+            if server.virtualize_efforts:
+                lines.append("    virtualize_efforts: true")
         lines.append("")
 
         # --- remote_servers ---

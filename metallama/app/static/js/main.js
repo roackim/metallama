@@ -1,4 +1,5 @@
 import { api } from "./core/api.js";
+import { registerModal } from "./core/modal.js";
 import { setConfigMessage } from "./core/uiMessage.js";
 import { checkAuthEnabled, isAdmin, login, logout, onAdminChange, verifyToken } from "./core/auth.js";
 import { setupModels, refreshModels } from "./features/models/index.js";
@@ -102,13 +103,10 @@ async function init() {
   }
 
   if (loginModal) {
+    registerModal(loginModal, closeLoginModal);
+
     loginModal.addEventListener("click", async (e) => {
-      if (!(e.target instanceof HTMLButtonElement)) {
-        // Click on overlay closes
-        if (e.target === loginModal) closeLoginModal();
-        return;
-      }
-      const action = e.target.dataset.action;
+      const action = e.target instanceof HTMLButtonElement ? e.target.dataset.action : undefined;
       if (action === "login-close" || action === "login-cancel") closeLoginModal();
       else if (action === "login-submit") await submitLogin();
     });
@@ -116,8 +114,8 @@ async function init() {
 
   if (loginPw) {
     loginPw.addEventListener("keydown", async (e) => {
+      // Escape is handled centrally by registerModal(loginModal, …).
       if (e.key === "Enter") { e.preventDefault(); await submitLogin(); }
-      if (e.key === "Escape") closeLoginModal();
     });
   }
 

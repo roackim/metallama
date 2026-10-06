@@ -27,7 +27,7 @@ from ..profiles import MODEL_PROFILES
 from ..runtime import status_for
 from .proxy import proxy
 from .reasoning import apply_reasoning
-from .registry import effective_reasoning_efforts, get_all_subservers, get_subserver, split_virtual_model
+from .registry import get_all_subservers, get_subserver, split_virtual_model, virtual_efforts
 from .schemas import SubserverConfig
 
 router = APIRouter()
@@ -81,11 +81,9 @@ async def list_models() -> JSONResponse:
                 "status": {"value": await _status(srv, client)},
                 "meta": {**srv.upstream_meta, "n_ctx": srv.context_length},
             }
-            # Same virtual reasoning-effort variants as the other gateways.
-            efforts = effective_reasoning_efforts(srv)
-            if not efforts:
-                models.append(entry)
-            for effort in efforts:
+            models.append(entry)
+            # Same virtual "name:effort" models as the other gateways.
+            for effort in virtual_efforts(srv):
                 models.append({**entry, "id": f"{srv.name}:{effort}"})
     return JSONResponse({"object": "list", "data": models})
 
@@ -136,11 +134,13 @@ async def passthrough(path: str, request: Request) -> Response:
     params = dict(request.query_params)
 
     body: dict[str, Any] | None = None
-    if content and "json" in headers.get("content-type", "application/json"):
+    # llama-server parses bodies as JSON whatever the content type (curl defaults
+    # to form-urlencoded), so do the same; only multipart uploads are left raw.
+    if content and "multipart/" not in headers.get("content-type", ""):
         try:
             parsed = json.loads(content)
-        except json.JSONDecodeError:
-            return _error("invalid JSON body", 400)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            parsed = None  # not JSON: forward untouched, upstream decides
         if isinstance(parsed, dict):
             body = parsed
 
@@ -162,7 +162,11 @@ async def passthrough(path: str, request: Request) -> Response:
         params["model"] = upstream_model
     if body is not None:
         if path.strip("/") in _CHAT_PATHS:
-            apply_reasoning(body, body, str(model))
+            try:
+                apply_reasoning(body, srv, str(model), dict(body))
+            except HTTPException as exc:
+                detail = exc.detail if isinstance(exc.detail, dict) else {"error": str(exc.detail)}
+                return _error(str(detail.get("error")), exc.status_code)
         if "model" in body:
             body["model"] = upstream_model
         content = json.dumps(body).encode()

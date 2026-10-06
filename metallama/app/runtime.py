@@ -25,17 +25,19 @@ runtime_processes: dict[str, ProcessState] = {}
 model_locks: dict[str, asyncio.Lock] = {key: asyncio.Lock() for key in MODEL_PROFILES}
 
 
-def _supported_reasoning_efforts(model_name: str) -> list[str]:
+def _supported_reasoning_efforts(profile: ModelProfile) -> list[str]:
     """Return the reasoning-effort values the model's chat template supports.
 
-    Looked up from the gateway registry (populated by probing /props). Falls
-    back to [] if the model isn't in the registry or hasn't been probed yet.
+    Taken from the gateway registry (probed from /props once the server has
+    run), else read offline from the template the server will use.
     """
+    from .gateway.probe import template_reasoning_efforts
+    from .gateway.registry import get_subserver
     try:
-        from .gateway.registry import get_subserver
-        return list(get_subserver(model_name).supported_reasoning_efforts)
-    except Exception:
-        return []
+        efforts = get_subserver(profile.name).supported_reasoning_efforts
+    except HTTPException:
+        efforts = []
+    return list(efforts) or template_reasoning_efforts(str(profile.model_path), profile.extra_args)
 
 
 def _get_engine_default_args(engine: str) -> list[str]:
@@ -66,6 +68,8 @@ def get_profile_with_config(profile: ModelProfile) -> ModelProfile:
         overrides["mmproj"] = server_entry.mmproj
     if server_entry.reasoning_efforts != profile.reasoning_efforts:
         overrides["reasoning_efforts"] = server_entry.reasoning_efforts
+    if server_entry.virtualize_efforts != profile.virtualize_efforts:
+        overrides["virtualize_efforts"] = server_entry.virtualize_efforts
 
     return replace(profile, **overrides) if overrides else profile
 
@@ -378,7 +382,8 @@ async def model_payload(profile: ModelProfile) -> dict[str, Any]:
         "model_draft": profile.model_draft,
         "mmproj": profile.mmproj,
         "reasoning_efforts": profile.reasoning_efforts,
-        "supported_reasoning_efforts": _supported_reasoning_efforts(profile.name),
+        "virtualize_efforts": profile.virtualize_efforts,
+        "supported_reasoning_efforts": _supported_reasoning_efforts(profile),
         "model_found": model_found,
         "managed": True,
         "last_exit": get_unexpected_exit(profile.name) if status == "offline" else None,

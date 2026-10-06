@@ -6,17 +6,45 @@ from datetime import datetime, timezone
 from typing import Any, AsyncIterator
 
 import httpx
-from fastapi import APIRouter, Body
+from fastapi import APIRouter, Body, HTTPException, Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.routing import APIRoute
 from starlette.background import BackgroundTask
 
 from ..http_client import get_client, shared_client
 from .probe import probe_one, _DEFAULT_CONTEXT_LENGTH
 from .reasoning import apply_reasoning
-from .registry import effective_reasoning_efforts, get_subserver, get_all_subservers, split_virtual_model
+from .registry import effective_reasoning_efforts, get_all_subservers, get_subserver, split_virtual_model, virtual_efforts
 from .schemas import OllamaChatRequest, OllamaGenerateRequest, OllamaShowRequest
 
-router = APIRouter()
+class _OllamaRoute(APIRoute):
+    """Errors in Ollama's shape: `{"error": "message"}` with the real status.
+
+    FastAPI renders HTTPException as `{"detail": ...}` and validation errors as
+    422, neither of which Ollama clients read (they take the top-level `error`).
+    """
+
+    def get_route_handler(self):
+        handler = super().get_route_handler()
+
+        async def wrapped(request: Request) -> Response:
+            try:
+                return await handler(request)
+            except HTTPException as exc:
+                detail = exc.detail
+                message = detail.get("error") if isinstance(detail, dict) else detail
+                return JSONResponse({"error": str(message)}, status_code=exc.status_code)
+            except RequestValidationError as exc:
+                first = exc.errors()[0] if exc.errors() else {}
+                where = ".".join(str(x) for x in first.get("loc", ())[1:])
+                return JSONResponse({"error": f"invalid request: {where}: {first.get('msg', 'invalid')}".replace(": :", ":")},
+                                    status_code=400)
+
+        return wrapped
+
+
+router = APIRouter(route_class=_OllamaRoute)
 
 _TIMEOUT = httpx.Timeout(connect=5.0, read=600.0, write=30.0, pool=5.0)
 _HEALTH_TIMEOUT = httpx.Timeout(1.0)
@@ -28,6 +56,18 @@ def _digest(name: str) -> str:
 
 def _now() -> str:
     return datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _capabilities(srv: Any) -> list[str]:
+    """Ollama capability list; "thinking" tells clients they may send `think`."""
+    caps = ["completion"]
+    if srv.tools:
+        caps.append("tools")
+    if srv.thinking:
+        caps.append("thinking")
+    if srv.vision:
+        caps.append("vision")
+    return caps
 
 
 # ---------------------------------------------------------------------------
@@ -63,9 +103,7 @@ async def list_tags() -> JSONResponse:
                 await probe_one(srv, client)
             model_name = srv.name
             families = [srv.family] if srv.family else []
-            capabilities = ["completion"]
             if srv.vision:
-                capabilities.append("vision")
                 families.append("clip")
             base_entry = {
                 "name": model_name,
@@ -81,14 +119,13 @@ async def list_tags() -> JSONResponse:
                     "quantization_level": srv.quantization,
                     "context_length": srv.context_length,
                 },
-                "capabilities": capabilities,
+                "capabilities": _capabilities(srv),
+                "reasoning_efforts": effective_reasoning_efforts(srv),
             }
-            # Virtual reasoning-effort models (e.g. "name:low", "name:high"),
-            # derived from the server's effective (enabled ∩ supported) efforts.
-            effective_efforts = effective_reasoning_efforts(srv)
-            if not effective_efforts:
-                models.append(base_entry)
-            for effort in effective_efforts:
+            models.append(base_entry)
+            # Virtual "name:effort" models for clients that can't send an effort
+            # parameter; clients that can should use the base model + `think`.
+            for effort in virtual_efforts(srv):
                 vname = f"{model_name}:{effort}"
                 models.append({
                     **base_entry,
@@ -159,13 +196,7 @@ async def show(req: OllamaShowRequest) -> JSONResponse:
     arch = srv.family
     model_name = srv.name
     families = [arch] if arch else []
-    capabilities = ["completion"]
-    if srv.tools:
-        capabilities.append("tools")
-    if srv.thinking:
-        capabilities.append("thinking")
     if srv.vision:
-        capabilities.append("vision")
         families.append("clip")
     # Clients look up `<general.architecture>.context_length`, so the keys stay
     # consistent with the architecture field even when it is empty.
@@ -196,7 +227,8 @@ async def show(req: OllamaShowRequest) -> JSONResponse:
             "model_info": model_info,
             "modelinfo": model_info,
             "parameters": f"num_ctx {srv.context_length}",
-            "capabilities": capabilities,
+            "capabilities": _capabilities(srv),
+            "reasoning_efforts": effective_reasoning_efforts(srv),
         }
     )
 
@@ -327,10 +359,20 @@ def _upstream_error_message(raw: bytes) -> str:
 def _response_format(fmt: Any) -> dict[str, Any] | None:
     """Ollama `format` ("json" or a JSON schema) → OpenAI `response_format`."""
     if fmt == "json":
-        return {"type": "json_object"}
+        # llama-server leaves a bare json_object unconstrained (the model may wrap
+        # the JSON in markdown fences); a schema makes the grammar enforce it.
+        return {"type": "json_schema", "json_schema": {"name": "response", "schema": {"type": "object"}}}
     if isinstance(fmt, dict):
         return {"type": "json_schema", "json_schema": {"name": "response", "schema": fmt}}
     return None
+
+
+# Base64 prefixes of common image signatures (Ollama sends bare base64, no type).
+_IMAGE_MAGIC = {"iVBORw0KGgo": "image/png", "/9j/": "image/jpeg", "R0lGOD": "image/gif", "UklGR": "image/webp"}
+
+
+def _image_mime(b64: str) -> str:
+    return next((mime for magic, mime in _IMAGE_MAGIC.items() if b64.startswith(magic)), "image/jpeg")
 
 
 def _image_parts(text: str, images: list[str] | None) -> str | list[dict[str, Any]]:
@@ -340,7 +382,7 @@ def _image_parts(text: str, images: list[str] | None) -> str | list[dict[str, An
     parts: list[dict[str, Any]] = [{"type": "text", "text": text}] if text else []
     for img in images:
         # If the client already sent a data: URL, pass it through.
-        url = img if img.startswith("data:") else f"data:image/jpeg;base64,{img}"
+        url = img if img.startswith("data:") else f"data:{_image_mime(img)};base64,{img}"
         parts.append({"type": "image_url", "image_url": {"url": url}})
     return parts
 
@@ -437,7 +479,7 @@ async def _stream_chat(model: str, shape: str, resp: httpx.Response) -> AsyncIte
 async def _run_chat(model: str, shape: str, srv_url: str, payload: dict[str, Any]) -> StreamingResponse | JSONResponse:
     """Send a chat payload upstream and answer in Ollama chat/generate shape."""
     if payload.get("stream"):
-        payload["stream_options"] = {"include_usage": True}
+        payload["stream_options"] = {"include_usage": True, **(payload.get("stream_options") or {})}
         try:
             client = get_client()
             resp = await client.send(
@@ -445,7 +487,7 @@ async def _run_chat(model: str, shape: str, srv_url: str, payload: dict[str, Any
                 stream=True,
             )
         except httpx.ConnectError:
-            return _ollama_error("upstream unreachable", 502)
+            return _ollama_error("model server unreachable (loading or stopped)", 503)
         except httpx.TimeoutException:
             return _ollama_error("upstream timeout", 504)
         if resp.status_code != 200:
@@ -467,7 +509,7 @@ async def _run_chat(model: str, shape: str, srv_url: str, payload: dict[str, Any
         async with shared_client() as client:
             resp = await client.post(f"{srv_url}/v1/chat/completions", json=payload, timeout=_TIMEOUT)
     except httpx.ConnectError:
-        return _ollama_error("upstream unreachable", 502)
+        return _ollama_error("model server unreachable (loading or stopped)", 503)
     except httpx.TimeoutException:
         return _ollama_error("upstream timeout", 504)
     if resp.status_code != 200:
@@ -502,6 +544,21 @@ def _base_payload(model: str, stream: bool, options: dict[str, Any] | None, fmt:
     return payload
 
 
+# metallama extensions (not part of Ollama's API), read from the request's extra
+# top-level fields: the same reasoning replay controls as /openai, and
+# stream_options.
+_EXTENSION_FIELDS = (
+    "preserve_reasoning", "preserve_thinking", "clear_thinking", "reasoning", "chat_template_kwargs",
+    "stream_options",
+)
+
+
+def _apply_extensions(payload: dict[str, Any], body: dict[str, Any]) -> None:
+    for key in _EXTENSION_FIELDS:
+        if key in body:
+            payload[key] = body[key]
+
+
 @router.post("/api/chat", response_model=None)
 async def chat(req: OllamaChatRequest) -> StreamingResponse | JSONResponse:
     srv = get_subserver(req.model)
@@ -511,7 +568,8 @@ async def chat(req: OllamaChatRequest) -> StreamingResponse | JSONResponse:
     payload["messages"] = [_ollama_message_to_openai(m) for m in req.messages]
     if req.tools:
         payload["tools"] = req.tools
-    apply_reasoning(payload, req.model_dump(exclude_none=True), req.model)
+    _apply_extensions(payload, body := req.model_dump(exclude_none=True))
+    apply_reasoning(payload, srv, req.model, body)
     return await _run_chat(req.model, "chat", srv.url, payload)
 
 
@@ -541,7 +599,7 @@ async def _stream_generate_raw(model: str, resp: httpx.Response) -> AsyncIterato
 async def _run_raw_generate(model: str, srv_url: str, payload: dict[str, Any]) -> StreamingResponse | JSONResponse:
     """`raw: true` generate: the prompt goes to llama-server untemplated."""
     if payload.get("stream"):
-        payload["stream_options"] = {"include_usage": True}
+        payload["stream_options"] = {"include_usage": True, **(payload.get("stream_options") or {})}
         try:
             client = get_client()
             resp = await client.send(
@@ -549,7 +607,7 @@ async def _run_raw_generate(model: str, srv_url: str, payload: dict[str, Any]) -
                 stream=True,
             )
         except httpx.ConnectError:
-            return _ollama_error("upstream unreachable", 502)
+            return _ollama_error("model server unreachable (loading or stopped)", 503)
         except httpx.TimeoutException:
             return _ollama_error("upstream timeout", 504)
         if resp.status_code != 200:
@@ -570,7 +628,7 @@ async def _run_raw_generate(model: str, srv_url: str, payload: dict[str, Any]) -
         async with shared_client() as client:
             resp = await client.post(f"{srv_url}/v1/completions", json=payload, timeout=_TIMEOUT)
     except httpx.ConnectError:
-        return _ollama_error("upstream unreachable", 502)
+        return _ollama_error("model server unreachable (loading or stopped)", 503)
     except httpx.TimeoutException:
         return _ollama_error("upstream timeout", 504)
     if resp.status_code != 200:
@@ -604,7 +662,8 @@ async def generate_endpoint(req: OllamaGenerateRequest) -> StreamingResponse | J
         messages.append({"role": "system", "content": req.system})
     messages.append({"role": "user", "content": _image_parts(req.prompt, req.images)})
     payload["messages"] = messages
-    apply_reasoning(payload, req.model_dump(exclude_none=True), req.model)
+    _apply_extensions(payload, body := req.model_dump(exclude_none=True))
+    apply_reasoning(payload, srv, req.model, body)
     return await _run_chat(req.model, "generate", srv.url, payload)
 
 
@@ -620,7 +679,7 @@ async def _embed(model: str, inputs: list[str]) -> tuple[list[list[float]], int]
         async with shared_client() as client:
             resp = await client.post(f"{srv.url}/v1/embeddings", json=payload, timeout=_TIMEOUT)
     except httpx.ConnectError:
-        return _ollama_error("upstream unreachable", 502)
+        return _ollama_error("model server unreachable (loading or stopped)", 503)
     except httpx.TimeoutException:
         return _ollama_error("upstream timeout", 504)
     if resp.status_code != 200:
