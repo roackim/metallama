@@ -18,7 +18,7 @@ import json
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
 from ..auth import admin_guard
@@ -124,14 +124,23 @@ async def _load_or_unload(body: dict[str, Any], start: bool) -> JSONResponse:
     return JSONResponse({"success": True})
 
 
+async def _json_body(request: Request) -> dict[str, Any]:
+    """Parse the body as JSON whatever the content type, like llama-server (curl -d sends form-urlencoded)."""
+    try:
+        parsed = json.loads(await request.body())
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 @router.post("/models/load")
-async def load_model(body: dict[str, Any] = Body(...), _guard: None = Depends(admin_guard)) -> JSONResponse:
-    return await _load_or_unload(body, start=True)
+async def load_model(request: Request, _guard: None = Depends(admin_guard)) -> JSONResponse:
+    return await _load_or_unload(await _json_body(request), start=True)
 
 
 @router.post("/models/unload")
-async def unload_model(body: dict[str, Any] = Body(...), _guard: None = Depends(admin_guard)) -> JSONResponse:
-    return await _load_or_unload(body, start=False)
+async def unload_model(request: Request, _guard: None = Depends(admin_guard)) -> JSONResponse:
+    return await _load_or_unload(await _json_body(request), start=False)
 
 
 @router.get("/health")
