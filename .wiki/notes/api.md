@@ -80,17 +80,49 @@ Model lifecycle, configuration, and service endpoints.
 | `/ollama/api/version` | GET | Version info |
 | `/ollama/api/show` | POST | Model details |
 | `/ollama/api/chat` | POST | Chat completion (streaming NDJSON) |
-| `/ollama/api/generate` | POST | Text generation (streaming NDJSON) |
+| `/ollama/api/generate` | POST | Generation through the chat template (`system`, `images`, `think`); `raw: true` bypasses it |
+| `/ollama/api/embed` | POST | Embeddings (`input` str or list); needs a server started with `--embeddings` |
+| `/ollama/api/embeddings` | POST | Legacy single-prompt embeddings |
+| `/ollama` | GET/HEAD | "Ollama is running" health ping |
 
-## OpenAI API (mounted at `/ollama`)
+Ollama-compatibility notes: thinking is returned as `message.thinking` (chat) / `thinking`
+(generate); `format` accepts `"json"` or a JSON schema; empty `messages`/`prompt` is a
+load/unload ping answered locally (`done_reason: load|unload`); final `done` objects carry
+token counts and durations from llama-server timings; errors under `/ollama/api/` use
+Ollama's `{"error": "..."}` shape. `/api/show` capabilities (`tools`, `thinking`, `vision`)
+come from the probed `/props`.
+
+## OpenAI API (mounted at `/openai`, alias `/ollama`)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/ollama/v1/models` | GET | List models (OpenAI format) |
-| `/ollama/v1/chat/completions` | POST | Chat completion passthrough |
-| `/ollama/v1/completions` | POST | Completion passthrough |
+| `/openai/v1/models` | GET | List models (OpenAI format) |
+| `/openai/v1/chat/completions` | POST | Chat completion passthrough |
+| `/openai/v1/completions` | POST | Completion passthrough |
+| `/openai/v1/embeddings` | POST | Embeddings passthrough |
+
+Reasoning controls (chat completions, also applied by `/ollama/api/chat` and `/llamacpp`):
+effort from the `:low`/`:high` model suffix, `reasoning_effort`, `reasoning.effort`,
+`options.reasoning_effort` or Ollama `think`; `none`/`false` sets `enable_thinking=false`.
+`preserve_thinking` is forwarded via `chat_template_kwargs`, and past assistant thinking sent
+as `reasoning`, `thinking` or `reasoning_details` is normalized to `reasoning_content`
+(see `gateway/reasoning.py`).
+
+## llama.cpp native API (mounted at `/llamacpp`)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+Shaped like llama-server's router mode (`--models-dir`): one base URL for every model.
+
+| Endpoint | Method | Auth | Description |
+|----------|--------|------|-------------|
+| `/llamacpp/models`, `/llamacpp/v1/models` | GET | — | All models with `status.value` = `loaded` / `loading` / `unloaded` |
+| `/llamacpp/models/load` | POST | admin | `{"model": ...}` — start a managed server (remote → 400) |
+| `/llamacpp/models/unload` | POST | admin | `{"model": ...}` — stop a managed server |
+| `/llamacpp/health` | GET | — | Gateway health |
+| `/llamacpp/{path}` | any | — | Forwarded to the server picked by body `model` (POST) or `?model=` (GET); `model` is rewritten to the upstream id. Required unless only one server exists. |
 
 ## See Also
 - [Architecture overview](./architecture.md)
 - [Main routes](../tree/app.md)
-- [Ollama routes](../tree/app-ollama-routes.md)
+- [Gateway package](../tree/app-gateway.md)

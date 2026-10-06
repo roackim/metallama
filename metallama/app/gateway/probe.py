@@ -14,6 +14,9 @@ _PROBE_TIMEOUT = httpx.Timeout(3.0)
 # values inferred from a chat template so we only surface recognized levels.
 KNOWN_REASONING_EFFORTS = ("none", "low", "medium", "high", "xhigh")
 
+# Chat-template fragments that indicate the model emits separate thinking.
+_THINKING_MARKERS = ("<think>", "enable_thinking", "reasoning_content")
+
 
 def _infer_reasoning_efforts(chat_template: str) -> list[str]:
     """Infer the reasoning-effort values a chat template supports.
@@ -42,12 +45,6 @@ def _infer_reasoning_efforts(chat_template: str) -> list[str]:
             found.add(lit)
     # Keep only recognized values, in canonical order.
     return [v for v in KNOWN_REASONING_EFFORTS if v in found]
-
-
-def _fallback_arch(current_family: str) -> str:
-    if current_family and current_family != "unknown":
-        return current_family
-    return "llama"
 
 
 def _pick_upstream_model(models: list[dict], configured_name: str) -> dict | None:
@@ -92,7 +89,6 @@ _DEFAULT_CONTEXT_LENGTH = 4096
 
 async def probe_one(srv: SubserverConfig, client: httpx.AsyncClient) -> None:
     """Probe a single subserver and backfill its metadata in place."""
-    srv.family = _fallback_arch(srv.family)
     props_ctx: int | None = None
     srv.reachable = False
 
@@ -109,9 +105,14 @@ async def probe_one(srv: SubserverConfig, client: httpx.AsyncClient) -> None:
                 if isinstance(modalities, dict):
                     srv.vision = bool(modalities.get("vision"))
                 # Infer which reasoning-effort values the chat template supports.
-                srv.supported_reasoning_efforts = _infer_reasoning_efforts(
-                    props_payload.get("chat_template") or ""
+                template = props_payload.get("chat_template") or ""
+                srv.supported_reasoning_efforts = _infer_reasoning_efforts(template)
+                srv.thinking = bool(srv.supported_reasoning_efforts) or any(
+                    marker in template for marker in _THINKING_MARKERS
                 )
+                caps = props_payload.get("chat_template_caps")
+                if isinstance(caps, dict) and "supports_tools" in caps:
+                    srv.tools = bool(caps["supports_tools"])
     except (httpx.ConnectError, httpx.TimeoutException, ValueError):
         pass
 
@@ -131,7 +132,7 @@ async def probe_one(srv: SubserverConfig, client: httpx.AsyncClient) -> None:
                     if size is not None:
                         srv.size = size
 
-                if srv.parameter_size == "unknown":
+                if not srv.parameter_size:
                     n_params = _coerce_int(meta.get("n_params"))
                     if n_params is not None:
                         srv.parameter_size = f"{round(n_params / 1e9, 1)}B"
@@ -147,7 +148,8 @@ async def probe_one(srv: SubserverConfig, client: httpx.AsyncClient) -> None:
                     if ctx is not None:
                         srv.context_length = ctx
 
-                srv.family = meta.get("general.architecture", srv.family)
+                # llama-server reports the GGUF file type (e.g. "Q8_0") as ftype.
+                srv.quantization = str(meta.get("ftype") or "")
 
     except (httpx.ConnectError, httpx.TimeoutException):
         pass

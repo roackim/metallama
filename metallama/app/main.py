@@ -11,9 +11,11 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import Body, Depends, FastAPI, Header, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request
+from fastapi.exception_handlers import http_exception_handler as default_http_exception_handler
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .auth import admin_guard, auth_enabled, check_password, create_session, revoke_session
 from .config import STATIC_DIR, Config
@@ -22,10 +24,11 @@ from .memtrim import periodic_malloc_trim
 from .hf_routes import router as hf_router
 from .logs import begin_capture, get_last_exit, log_file_path, mark_expected_stop, server_logs
 from .models import ProcessState
-from .ollama.probe import probe_subservers
-from .ollama.registry import rebuild_registry as rebuild_ollama_registry
-from .ollama.routes.ollama import router as ollama_router
-from .ollama.routes.openai import router as openai_router
+from .gateway.probe import probe_subservers
+from .gateway.registry import rebuild_registry as rebuild_gateway_registry
+from .gateway.ollama import router as ollama_router
+from .gateway.openai import router as openai_router
+from .gateway.llamacpp import router as llamacpp_router
 from .profiles import MODEL_PROFILES
 from .runtime import (
     binary_health,
@@ -81,12 +84,26 @@ app = FastAPI(title="metallama", lifespan=lifespan)
 app.mount("/static", NoCacheStaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # ---------------------------------------------------------------------------
-# Ollama / OpenAI gateway (mounted at /ollama)
+# Gateways: Ollama (/ollama), OpenAI (/openai/v1), native llama.cpp (/llamacpp).
+# /ollama/v1 is kept as a hidden alias of the OpenAI gateway for older clients.
 # ---------------------------------------------------------------------------
 
-rebuild_ollama_registry()
+rebuild_gateway_registry()
 app.include_router(ollama_router, prefix="/ollama")
-app.include_router(openai_router, prefix="/ollama")
+app.include_router(openai_router, prefix="/openai")
+app.include_router(openai_router, prefix="/ollama", include_in_schema=False)
+app.include_router(llamacpp_router, prefix="/llamacpp")
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> Response:
+    """Ollama clients read errors from a top-level `error` string."""
+    if request.url.path.startswith("/ollama/api/"):
+        detail = exc.detail
+        message = detail.get("error", str(detail)) if isinstance(detail, dict) else str(detail)
+        return JSONResponse({"error": message}, status_code=exc.status_code, headers=exc.headers)
+    return await default_http_exception_handler(request, exc)
+
 app.include_router(hf_router)
 
 # Server-side history storage (500 samples at 1s = ~8 minutes)
@@ -666,8 +683,8 @@ def list_model_files() -> dict[str, Any]:
 @app.get("/api/models")
 async def list_models() -> dict[str, Any]:
     from .unified_config import load_unified_config
-    from .ollama.probe import probe_one
-    from .ollama.schemas import SubserverConfig
+    from .gateway.probe import probe_one
+    from .gateway.schemas import SubserverConfig
     from .http_client import shared_client
 
     managed = await asyncio.gather(*[model_payload(profile) for profile in MODEL_PROFILES.values()])
@@ -779,7 +796,7 @@ async def create_model(payload: dict[str, Any] = Body(...), _guard: None = Depen
             raise HTTPException(status_code=400, detail="model_path is required")
         server = add_managed_server(payload)
         reload_model_profiles()
-        rebuild_ollama_registry()
+        rebuild_gateway_registry()
         return {"ok": True, "name": server.name}
     elif model_type == "remote":
         if not payload.get("name"):
@@ -807,7 +824,7 @@ async def delete_model(model_name: str, _guard: None = Depends(admin_guard)) -> 
                 raise HTTPException(status_code=409, detail="Stop the server before deleting")
         delete_managed_server(model_name)
         reload_model_profiles()
-        rebuild_ollama_registry()
+        rebuild_gateway_registry()
         return {"ok": True, "deleted": model_name}
 
     # Try remote
@@ -1175,7 +1192,7 @@ async def update_model_config(model_name: str, payload: dict[str, Any] = Body(..
         update_managed_server(model_name, updates)
         # Reload profiles from disk so changes take effect immediately
         reload_model_profiles()
-        rebuild_ollama_registry()
+        rebuild_gateway_registry()
 
     # If the server was running and a restart was requested, restart it now
     # (or wait for slots to free up first).
@@ -1221,7 +1238,7 @@ async def update_remote_server_config(server_name: str, payload: dict[str, Any] 
 
     if updates:
         update_remote_server(server_name, updates)
-        rebuild_ollama_registry()
+        rebuild_gateway_registry()
 
     unified = load_unified_config()
     entry = next((s for s in unified.remote_servers if s.name == (updates.get("name") or server_name)), None)

@@ -32,7 +32,7 @@ def _supported_reasoning_efforts(model_name: str) -> list[str]:
     back to [] if the model isn't in the registry or hasn't been probed yet.
     """
     try:
-        from .ollama.registry import get_subserver
+        from .gateway.registry import get_subserver
         return list(get_subserver(model_name).supported_reasoning_efforts)
     except Exception:
         return []

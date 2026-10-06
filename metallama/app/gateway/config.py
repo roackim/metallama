@@ -5,6 +5,7 @@ from pathlib import Path
 import yaml
 
 from ..unified_config import load_unified_config
+from .registry import known_or_empty
 from .schemas import AppConfig, SubserverConfig
 
 
@@ -34,8 +35,8 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             name=server.name,
             url=server.url,
             size=0,
-            family=server.family,
-            parameter_size=server.size,
+            family=known_or_empty(server.family),
+            parameter_size=known_or_empty(server.size),
             context_length=server.context_length,
         ))
 

@@ -47,9 +47,9 @@ Loaded by `unified_config.py` into `UnifiedConfig` Pydantic model. Cached in mem
 ## Legacy Config
 
 - `server_configs.json` — formerly used for per-server overrides; now superseded by `config.yaml`
-- `metallama/app/ollama/config.yaml` — formerly used for ollama gateway subservers; now loaded from unified `config.yaml`
+- `metallama/app/gateway/config.yaml` — formerly used for ollama gateway subservers; now loaded from unified `config.yaml`
 
 ## See Also
 - [Unified config module](../tree/app.md)
-- [Ollama module](../tree/app-ollama.md)
+- [Gateway package](../tree/app-gateway.md)
 - [Root files](../tree/root.md)

@@ -10,15 +10,18 @@ function fillSnippets(model) {
   const m = model || "<model>";
   document.getElementById("connect-ollama-url").textContent = `${base()}/ollama`;
   document.getElementById("connect-env").textContent =
-    `export OPENAI_BASE_URL="${base()}/ollama/v1"\n` +
+    `export OPENAI_BASE_URL="${base()}/openai/v1"\n` +
     `export OPENAI_API_KEY="metallama"\n` +
     `export OPENAI_MODEL="${m}"`;
   document.getElementById("connect-openai").textContent =
-    `Base URL: ${base()}/ollama/v1\n` +
+    `Base URL: ${base()}/openai/v1\n` +
     `API key:  any non-empty string\n` +
     `Model:    ${m}`;
+  document.getElementById("connect-llamacpp-url").textContent =
+    `Base URL: ${base()}/llamacpp\n` +
+    `Model:    ${m}  (body "model", or ?model= on GET)`;
   document.getElementById("connect-curl").textContent =
-    `curl ${base()}/ollama/v1/chat/completions \\\n` +
+    `curl ${base()}/openai/v1/chat/completions \\\n` +
     `  -H 'Content-Type: application/json' \\\n` +
     `  -d '{"model": "${m}", "messages": [{"role": "user", "content": "Hello"}]}'`;
 }

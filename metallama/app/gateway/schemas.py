@@ -8,8 +8,11 @@ class SubserverConfig(BaseModel):
     name: str
     url: str
     size: int = 0
-    family: str = "unknown"
-    parameter_size: str = "unknown"
+    # Model details as reported by llama-server (or set in config).
+    # Empty means unknown; nothing is guessed.
+    family: str = ""
+    parameter_size: str = ""
+    quantization: str = ""
     context_length: int = 4096
     parallel: int = 1
     upstream_model_id: Optional[str] = None
@@ -18,6 +21,10 @@ class SubserverConfig(BaseModel):
     # Whether the upstream model supports vision (multimodal projector / mmproj).
     # Detected from llama-server's /props -> modalities.vision during probing.
     vision: bool = False
+    # Chat-template capabilities detected from /props: whether the model emits
+    # thinking and whether its template accepts tools (Ollama `capabilities`).
+    thinking: bool = False
+    tools: bool = True
     # Reasoning-effort values the model's chat template actually supports,
     # inferred from /props -> chat_template during probing (e.g. ["low","xhigh"]).
     supported_reasoning_efforts: list[str] = Field(default_factory=list)
@@ -64,9 +71,17 @@ class OllamaChatRequest(BaseModel):
 
 class OllamaGenerateRequest(BaseModel):
     model: str
-    prompt: str
+    prompt: str = ""
+    system: Optional[str] = None
+    images: Optional[list[str]] = None
+    raw: bool = False
     stream: bool = True
+    format: Optional[Any] = None
+    keep_alive: Optional[Any] = None
     options: Optional[dict[str, Any]] = None
+
+    class Config:
+        extra = "allow"
 
 
 class OllamaShowRequest(BaseModel):

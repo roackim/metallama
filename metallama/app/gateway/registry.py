@@ -12,6 +12,11 @@ _registry: dict[str, SubserverConfig] = {}
 REASONING_EFFORTS = ("low", "medium", "high", "xhigh")
 
 
+def known_or_empty(value: str | None) -> str:
+    """Hand-edited config uses "unknown" as a placeholder; treat it as unset."""
+    return "" if not value or value == "unknown" else value
+
+
 def split_virtual_model(model_name: str, efforts: frozenset[str] | tuple | set | None = None) -> tuple[str, str | None]:
     """Split a model name into (base_name, effort_suffix).
 
@@ -53,7 +58,7 @@ def rebuild_registry() -> None:
     Merges (unified config wins on name conflicts):
     - managed_servers from config.yaml → routed via 127.0.0.1:<port>
     - remote_servers from config.yaml
-    - legacy subservers from app/ollama/config.yaml
+    - legacy subservers from app/gateway/config.yaml
 
     Probed metadata from the previous registry is carried over by URL so a
     config edit doesn't force a re-probe of running servers.
@@ -79,7 +84,8 @@ def rebuild_registry() -> None:
             SubserverConfig(
                 name=s.name,
                 url=s.url,
-                family=s.family,
+                family=known_or_empty(s.family),
+                parameter_size=known_or_empty(s.size),
                 context_length=s.context_length,
             ),
         )
@@ -100,12 +106,13 @@ def rebuild_registry() -> None:
             srv.upstream_model_id = old.upstream_model_id
             srv.upstream_meta = old.upstream_meta
             srv.vision = old.vision
+            srv.thinking = old.thinking
+            srv.tools = old.tools
             srv.supported_reasoning_efforts = old.supported_reasoning_efforts
             srv.size = srv.size or old.size
-            if srv.parameter_size == "unknown":
-                srv.parameter_size = old.parameter_size
-            if srv.family == "unknown":
-                srv.family = old.family
+            srv.parameter_size = srv.parameter_size or old.parameter_size
+            srv.family = srv.family or old.family
+            srv.quantization = srv.quantization or old.quantization
 
     _registry = merged
 
