@@ -315,6 +315,26 @@ def check_other_endpoints(base: str, prefix: str, model: str) -> None:
     check(f"{prefix} embeddings: reachable (200, or upstream's own status preserved)", st in (200, 400, 404, 500, 501), st)
 
 
+def check_llamacpp(base: str, model: str) -> None:
+    st, d, _ = call(base, "/llamacpp/v1/models")
+    data = d.get("data", []) if isinstance(d, dict) else []
+    check("/llamacpp/v1/models 200 with data[]", st == 200 and data, st)
+    check("/llamacpp/v1/models status.value on every entry",
+          all(m.get("status", {}).get("value") in ("loaded", "loading", "unloaded") for m in data))
+    check("/llamacpp/v1/models context_length on every entry",
+          all(isinstance(m.get("context_length"), int) and m["context_length"] > 0 for m in data))
+    check("/llamacpp/v1/models no null values", has_null(data) is None, has_null(data))
+    loaded = [m for m in data if m["status"]["value"] == "loaded"]
+    check("/llamacpp/v1/models architecture.input_modalities on loaded entries",
+          all(isinstance(m.get("architecture", {}).get("input_modalities"), list) for m in loaded), loaded[:1])
+    st, d, _ = call(base, "/llamacpp/props?model=__nope__")
+    check("/llamacpp unknown model: llama-server error shape, 404",
+          st == 404 and isinstance(d, dict) and d.get("error", {}).get("code") == 404, (st, d))
+    st, d, _ = call(base, "/openai/v1/chat/completions", {"model": "__nope__", "messages": []})
+    check("/openai unknown model: OpenAI-style error, 404",
+          st == 404 and isinstance(d, dict) and "error" in d and "detail" not in d, (st, d))
+
+
 def check_no_props(base: str) -> None:
     for p in ("/props", "/openai/props", "/openai/v1/props", "/openrouter/props", "/openrouter/v1/props", "/ollama/v1/props"):
         st, _, _ = call(base, p)
@@ -436,6 +456,8 @@ def main() -> int:
             check_other_endpoints(a.base, prefix, a.model)
     print("\n=== openrouter extras")
     check_openrouter_extras(a.base, a.model)
+    print("\n=== /llamacpp")
+    check_llamacpp(a.base, a.model)
     print("\n=== /props")
     check_no_props(a.base)
     print("\n=== ollama")

@@ -43,8 +43,8 @@ plus shared `registry.py`, `probe.py`, `proxy.py`, `reasoning.py`).
 | **Not supported** | `pull`, `push`, `copy`, `delete`, `create` | — | auto-loading a stopped model ³ |
 
 1. Embeddings require the backing server to be started with `--embeddings`.
-2. Unknown model on `/openai` returns FastAPI's `{"detail": ...}` rather than an OpenAI-style error.
-3. Requests to a stopped model return `502`; start it with `/models/load` or from the UI.
+2. Unknown model on `/openai` returns an OpenAI-style `{"error": {...}}` (404).
+3. Requests to a stopped model return `503` (`model server unreachable`); start it with `/models/load` or from the UI.
 
 ---
 
@@ -166,6 +166,11 @@ the model is chosen per request.
 | `POST` | `/models/unload` | `{"model": ...}`; stops a managed server (admin) |
 | `GET` | `/health` | Gateway health |
 | any | `/<path>` | Forwarded to the selected server's `/<path>` |
+
+Extension fields on each model entry (not in llama-server; same shape as `/openai/v1/models`):
+`context_length`, `architecture.input_modalities` / `output_modalities` (omitted while
+vision support is unknown), and `reasoning.supported_efforts` / `default_effort`
+(omitted when the model allows no efforts).
 
 Model selection:
 

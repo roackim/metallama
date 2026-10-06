@@ -25,9 +25,13 @@ from ..auth import admin_guard
 from ..http_client import shared_client
 from ..profiles import MODEL_PROFILES
 from ..runtime import status_for
+from .openai import _reasoning_fields
+from .probe import probe_one
 from .proxy import proxy
 from .reasoning import apply_reasoning
-from .registry import get_all_subservers, get_subserver, split_virtual_model, virtual_efforts
+from .registry import (
+    effective_reasoning_efforts, get_all_subservers, get_subserver, split_virtual_model, virtual_efforts,
+)
 from .schemas import SubserverConfig
 
 router = APIRouter()
@@ -73,13 +77,26 @@ async def list_models() -> JSONResponse:
     models = []
     async with shared_client() as client:
         for srv in get_all_subservers():
+            status = await _status(srv, client)
+            # Backfill metadata (vision, context, efforts) for a server that came
+            # up after startup, as /openai/v1/models does.
+            if status == "loaded" and (not srv.vision_known or not srv.upstream_model_id):
+                await probe_one(srv, client)
             entry = {
                 "id": srv.name,
                 "object": "model",
                 "owned_by": "metallama",
                 "created": 1704067200,
-                "status": {"value": await _status(srv, client)},
+                "status": {"value": status},
                 "meta": {**srv.upstream_meta, "n_ctx": srv.context_length},
+                # Extensions beyond llama-server, same shape as /openai/v1/models.
+                "context_length": srv.context_length,
+                # Omitted while vision is unknown: absence means "unknown".
+                **({"architecture": {
+                    "input_modalities": ["text", "image"] if srv.vision else ["text"],
+                    "output_modalities": ["text"],
+                }} if srv.vision_known else {}),
+                **_reasoning_fields(effective_reasoning_efforts(srv), srv.default_reasoning_effort),
             }
             models.append(entry)
             # Same virtual "name:effort" models as the other gateways.
