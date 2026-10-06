@@ -1014,13 +1014,25 @@ function startEditMessage(el, msg) {
   });
 }
 
+// Follow the stream only while the user hasn't scrolled away. This is tracked
+// from the user's own scroll events: measuring after the content has grown
+// (a code block or long paragraph can add more than any threshold) would read
+// as "scrolled up" and stop following.
+let stickToBottom = true;
+let lastAutoTop = 0; // scrollTop we last set; its scroll event is not the user's
+
 function scrollBottom(force = false) {
-  const pinned = force || isPinned();
-  if (pinned) $messages.scrollTop = $messages.scrollHeight;
+  if (force) stickToBottom = true;
+  if (!stickToBottom) return;
+  $messages.scrollTop = $messages.scrollHeight;
+  lastAutoTop = $messages.scrollTop;
 }
 
-function isPinned() {
-  return $messages.scrollTop + $messages.clientHeight >= $messages.scrollHeight - 40;
+function onMessagesScroll() {
+  // Content growth doesn't fire scroll, and our own scroll lands on lastAutoTop.
+  if (stickToBottom && Math.abs($messages.scrollTop - lastAutoTop) < 1) return;
+  stickToBottom =
+    $messages.scrollHeight - $messages.scrollTop - $messages.clientHeight <= 40;
 }
 
 // ── Token budget ───────────────────────────────────────────
@@ -1248,6 +1260,7 @@ async function _streamAssistantReply(conv, model) {
           } else {
             updateThoughtsBody(thoughtsEl, reasoning);
           }
+          scrollBottom();
         }
         // Real token counts arrive on the final done line (when upstream
         // supports stream_options.include_usage).
@@ -1295,6 +1308,7 @@ async function _streamAssistantReply(conv, model) {
       conv.messages.push(saved);
       // Now that the stream is complete, render the full message as Markdown.
       renderMarkdown(assistantBody, content);
+      scrollBottom(); // the final render and the "Thought for" label change the height
     }
     saveConvs();
     updateTokenChip();
@@ -1347,6 +1361,7 @@ export function initChat() {
   if (conversations.length === 0) newConversation();
   else { renderConvList(); renderConvTitle(); }
   renderMessages();
+  $messages.addEventListener("scroll", onMessagesScroll, { passive: true });
 
   // Expand arrow lives in the main area (visible when collapsed);
   // collapse arrow lives inside the sidebar next to "Conversations".
