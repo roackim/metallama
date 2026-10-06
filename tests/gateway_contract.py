@@ -244,7 +244,11 @@ def check_effort(base: str, prefix: str, model: str, openrouter: bool) -> None:
     msgs = [{"role": "user", "content": "What is 17*23? Answer only the number."}]
     st, d, _ = call(base, f"{prefix}/chat/completions", {"model": model, "messages": msgs, "reasoning_effort": "none"})
     msg = d.get("choices", [{}])[0].get("message", {}) if isinstance(d, dict) else {}
-    check(f"{prefix} effort: reasoning_effort none -> no reasoning", st == 200 and not msg.get(key), (st, msg))
+    if st == 400 and isinstance(d, dict) and "none" not in d.get("error", {}).get("allowed_efforts", ["none"]):
+        # Mandatory-reasoning model: rejecting `none` and listing the allowed efforts is the contract.
+        check(f"{prefix} effort: reasoning_effort none rejected on mandatory-reasoning model", True)
+    else:
+        check(f"{prefix} effort: reasoning_effort none -> no reasoning", st == 200 and not msg.get(key), (st, msg))
     st, d, _ = call(base, f"{prefix}/chat/completions", {"model": model, "messages": msgs, "reasoning_effort": "low"})
     msg = d.get("choices", [{}])[0].get("message", {}) if isinstance(d, dict) else {}
     check(f"{prefix} effort: reasoning_effort low -> reasoning", st == 200 and bool(msg.get(key)), (st, str(msg)[:200]))
